@@ -104,4 +104,10 @@ function sendJson(res: NodeJS.WritableStream & { statusCode: number; setHeader: 
 
 export default defineConfig({
   plugins: [react(), planningCenterProxyPlugin()],
+  server: {
+    allowedHosts: true,
+  },
+  preview: {
+    allowedHosts: true,
+  },
 });
