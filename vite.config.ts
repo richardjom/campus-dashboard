@@ -2,6 +2,8 @@ import { defineConfig, type Plugin, type PreviewServer, type ViteDevServer } fro
 import react from "@vitejs/plugin-react";
 import { proxyFetchPcoPeople, proxyTestPcoConnection, type ProxyPcoCredentials } from "./server/planning-center-proxy";
 
+const allowedSandboxHosts = [".vercel.run", ".vercel.app"];
+
 function planningCenterProxyPlugin(): Plugin {
   const attachMiddleware = (server: ViteDevServer | PreviewServer) => {
     server.middlewares.use(async (req, res, next) => {
@@ -104,4 +106,12 @@ function sendJson(res: NodeJS.WritableStream & { statusCode: number; setHeader: 
 
 export default defineConfig({
   plugins: [react(), planningCenterProxyPlugin()],
+  server: {
+    host: "0.0.0.0",
+    allowedHosts: allowedSandboxHosts,
+  },
+  preview: {
+    host: "0.0.0.0",
+    allowedHosts: allowedSandboxHosts,
+  },
 });
