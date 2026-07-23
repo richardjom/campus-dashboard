@@ -3219,7 +3219,7 @@ function parseExperienceSummaryCsv(csvText: string): SundayMetric[] | null {
       continue;
     }
 
-    if (label === "TOTALS") {
+    if (label.toUpperCase() === "TOTALS") {
       // Legacy summary sheets end service sections with a TOTALS block. Reset the
       // active service so the rollup rows are not imported as another service line.
       currentServiceTime = undefined;
