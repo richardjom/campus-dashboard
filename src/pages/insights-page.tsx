@@ -16,6 +16,7 @@ import { getBigEventOverview } from "../lib/big-events";
 import {
   buildComparisonBrief,
   buildComparisonHtml,
+  churchGrowthBenchmarks,
   formatPeriodLong,
   getAvailableCampuses,
   getAvailableYears,
@@ -301,6 +302,8 @@ export function InsightsPage() {
         </section>
       </section>
 
+      <OperatingAgendaSection cards={insights.actionCards} />
+
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1.12fr)_minmax(320px,0.92fr)]">
         <section className="rounded-[30px] border border-gray-200 bg-white p-6 lg:p-7">
           <div className="flex items-start justify-between gap-4 border-b border-gray-200 pb-5">
@@ -503,9 +506,21 @@ export function InsightsPage() {
                   <p className="text-sm text-gray-500">{health.attendance.toLocaleString()} attendance</p>
                 </div>
                 <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                  <RatioPill label="Volunteer coverage" value={formatRatioPercent(health.volunteerRatio)} />
-                  <RatioPill label="Guest rate" value={formatRatioPercent(health.ftgRate)} />
-                  <RatioPill label="Kids ratio" value={formatRatioPercent(health.kidsRatio)} />
+                  <RatioPill
+                    label="Volunteer coverage"
+                    value={formatRatioPercent(health.volunteerRatio)}
+                    note={health.volunteerStatus}
+                  />
+                  <RatioPill
+                    label="Guest rate"
+                    value={formatRatioPercent(health.ftgRate)}
+                    note={`${health.ftgStatus} · target ${formatRatioPercent(churchGrowthBenchmarks.firstTimeGuestRateMin)}-${formatRatioPercent(churchGrowthBenchmarks.firstTimeGuestRateMax)}`}
+                  />
+                  <RatioPill
+                    label="Kids ratio"
+                    value={formatRatioPercent(health.kidsRatio)}
+                    note={`${health.kidsStatus} · target ${formatRatioPercent(churchGrowthBenchmarks.kidsRatioMin)}-${formatRatioPercent(churchGrowthBenchmarks.kidsRatioMax)}`}
+                  />
                 </div>
               </div>
             ))}
@@ -578,6 +593,89 @@ export function InsightsPage() {
   );
 }
 
+function OperatingAgendaSection({ cards }: { cards: ReturnType<typeof getDashboardInsights>["actionCards"] }) {
+  if (cards.length === 0) return null;
+
+  return (
+    <section className="rounded-[30px] border border-gray-200 bg-white p-6 lg:p-7">
+      <div className="flex items-start justify-between gap-4 border-b border-gray-200 pb-5">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Executive operating agenda</p>
+          <h2 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-950">Decisions, evidence, and next moves</h2>
+          <p className="mt-2 max-w-3xl text-xs leading-6 text-gray-500">
+            These cards translate the analysis into what leadership should decide, what evidence supports the read,
+            and what data would confirm or disprove it.
+          </p>
+        </div>
+        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#fbfbfc] text-slate-700">
+          <Sparkles className="h-4 w-4" />
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-4 xl:grid-cols-2">
+        {cards.map((card) => (
+          <div key={`${card.campus}-${card.lens}-${card.title}`} className="rounded-2xl border border-gray-200 bg-[#fbfbfc] p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-950">{card.title}</p>
+                <p className="mt-1 text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">{card.lens}</p>
+              </div>
+              <span
+                className={[
+                  "inline-flex rounded-full px-3 py-1 text-[11px] font-semibold whitespace-nowrap",
+                  card.urgency === "Decide now"
+                    ? "bg-rose-100 text-rose-700"
+                    : card.urgency === "This week"
+                      ? "bg-amber-100 text-amber-700"
+                      : "bg-slate-100 text-slate-700",
+                ].join(" ")}
+              >
+                {card.urgency}
+              </span>
+            </div>
+
+            <p className="mt-4 text-sm leading-6 text-slate-700">{card.diagnosis}</p>
+
+            <div className="mt-4 rounded-2xl border border-gray-200 bg-white p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Working theory</p>
+              <p className="mt-2 text-sm leading-6 text-slate-700">{card.hypothesis}</p>
+            </div>
+
+            <div className="mt-4 grid gap-3 lg:grid-cols-2">
+              <div className="rounded-2xl border border-gray-200 bg-white p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Decision</p>
+                <p className="mt-2 text-sm leading-6 text-slate-700">{card.decision}</p>
+              </div>
+              <div className="rounded-2xl border border-gray-200 bg-white p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Next move</p>
+                <p className="mt-2 text-sm leading-6 text-slate-700">{card.nextMove}</p>
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Evidence</p>
+              {card.evidence.slice(0, 4).map((item) => (
+                <p key={item} className="rounded-xl bg-white px-3 py-2 text-xs leading-5 text-gray-600">{item}</p>
+              ))}
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-dashed border-gray-200 bg-white p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Data to confirm</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {card.dataToConfirm.map((item) => (
+                  <span key={item} className="rounded-full bg-[#fbfbfc] px-3 py-1 text-xs font-medium text-slate-600">
+                    {item}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function buildMeetingTalkingPoints(
   insights: ReturnType<typeof getDashboardInsights>,
   scopeLabel: string,
@@ -586,21 +684,27 @@ function buildMeetingTalkingPoints(
 
   if (insights.scorecard) {
     points.push(
-      `${scopeLabel} is currently rated ${insights.scorecard.verdict.toLowerCase()}, with attendance ${formatSignedPercent(insights.scorecard.currentChange).toLowerCase()} versus the comparable prior window.`,
+      `${scopeLabel} is currently rated ${insights.scorecard.verdict.toLowerCase()}, with ${insights.metricLabel.toLowerCase()} ${formatSignedPercent(insights.scorecard.currentChange).toLowerCase()} versus the comparable prior window through the Reach, Connection, and Capacity framework.`,
     );
 
     if (insights.scorecard.acceleration !== null) {
       points.push(
         insights.scorecard.acceleration >= 0
           ? `Growth speed is improving, which suggests the current trend has more underlying strength than a simple one-period spike.`
-          : `Growth speed is slowing, which means topline growth should be pressure-tested before it is treated as durable momentum.`,
+          : `Growth speed is slowing, which means topline growth should be pressure-tested against seasonality, staffing changes, and serving capacity before it is treated as durable momentum.`,
       );
     }
   }
 
-  insights.findings.slice(0, 2).forEach((finding) => {
-    points.push(`${finding.title}. ${finding.detail}`);
+  insights.actionCards.slice(0, 2).forEach((card) => {
+    points.push(`${card.lens}: ${card.title}. ${card.hypothesis} Decision needed: ${card.decision}`);
   });
+
+  if (insights.actionCards.length === 0) {
+    insights.findings.slice(0, 2).forEach((finding) => {
+      points.push(`${finding.lens}: ${finding.title}. ${finding.detail}`);
+    });
+  }
 
   if (insights.health.length > 0) {
     const weakestCoverage = [...insights.health].sort((left, right) => left.volunteerRatio - right.volunteerRatio)[0];
@@ -624,19 +728,21 @@ function buildChairSummary(
 
   if (insights.scorecard) {
     summary.push(
-      `${scopeLabel} is currently ${insights.scorecard.verdict.toLowerCase()}, with ${formatSignedPercent(insights.scorecard.currentChange).toLowerCase()} attendance versus the same point in the prior comparison window.`,
+      `${scopeLabel} is currently ${insights.scorecard.verdict.toLowerCase()}, with ${formatSignedPercent(insights.scorecard.currentChange).toLowerCase()} ${insights.metricLabel.toLowerCase()} versus the same point in the prior comparison window.`,
     );
 
     if (insights.scorecard.acceleration !== null) {
       summary.push(
         insights.scorecard.acceleration >= 0
           ? `Growth speed is improving, which is a stronger signal than topline growth alone and suggests the trend has operational support behind it.`
-          : `Growth speed is slowing, which means current topline performance should be treated carefully until we see whether the slowdown is seasonal or structural.`,
+          : `Growth speed is slowing, so the executive question is whether the softness is seasonal, leadership-context related, or a real connection/capacity issue.`,
       );
     }
   }
 
-  if (insights.findings[0]) {
+  if (insights.actionCards[0]) {
+    summary.push(`${insights.actionCards[0].hypothesis} ${insights.actionCards[0].nextMove}`);
+  } else if (insights.findings[0]) {
     summary.push(insights.findings[0].detail);
   }
 
@@ -653,6 +759,17 @@ function buildRiskFlags(
 ) {
   const flags: Array<{ title: string; detail: string; level: "High" | "Watch" }> = [];
 
+  insights.actionCards
+    .filter((card) => card.urgency === "Decide now")
+    .slice(0, 2)
+    .forEach((card) => {
+      flags.push({
+        title: card.title,
+        detail: `${card.hypothesis} ${card.decision}`,
+        level: "High",
+      });
+    });
+
   if ((insights.scorecard?.acceleration ?? 0) < -5) {
     flags.push({
       title: "Momentum is slowing",
@@ -665,10 +782,10 @@ function buildRiskFlags(
     ? [...insights.health].sort((left, right) => left.volunteerRatio - right.volunteerRatio)[0]
     : null;
 
-  if (weakestCoverage && weakestCoverage.volunteerRatio < 0.14) {
+  if (weakestCoverage && weakestCoverage.volunteerRatio < churchGrowthBenchmarks.weeklyVolunteerCoverageWatch) {
     flags.push({
       title: `${weakestCoverage.campus} is capacity-constrained`,
-      detail: `Volunteer coverage is only ${formatRatioPercent(weakestCoverage.volunteerRatio)}. Further growth without staffing depth could create quality or retention pressure.`,
+      detail: `Weekly volunteer coverage is ${formatRatioPercent(weakestCoverage.volunteerRatio)}, below the ${formatRatioPercent(churchGrowthBenchmarks.weeklyVolunteerCoverageWatch)} watch line. Further growth without serving depth could create quality or retention pressure.`,
       level: "High",
     });
   }
@@ -707,17 +824,28 @@ function buildSundayDecisions(
 ) {
   const items: Array<{ label: string; title: string; detail: string; priority: "Now" | "This week" | "Monitor" }> = [];
 
-  insights.findings
-    .filter((finding) => finding.tone === "warning")
-    .slice(0, 2)
-    .forEach((finding) => {
+  insights.actionCards.slice(0, 3).forEach((card) => {
+    items.push({
+      label: card.lens,
+      title: card.title,
+      detail: `${card.decision} Next move: ${card.nextMove}`,
+      priority: card.urgency === "Decide now" ? "Now" : card.urgency,
+    });
+  });
+
+  if (items.length === 0) {
+    insights.findings
+      .filter((finding) => finding.tone === "warning")
+      .slice(0, 2)
+      .forEach((finding) => {
       items.push({
-        label: "Priority finding",
+        label: finding.lens,
         title: finding.title,
         detail: finding.detail,
         priority: "Now",
       });
     });
+  }
 
   const seasonalDelta = insights.scorecard?.seasonalDelta ?? null;
 
@@ -734,11 +862,11 @@ function buildSundayDecisions(
     ? [...insights.health].sort((left, right) => left.volunteerRatio - right.volunteerRatio)[0]
     : null;
 
-  if (weakestCoverage && weakestCoverage.volunteerRatio < 0.14) {
+  if (weakestCoverage && weakestCoverage.volunteerRatio < churchGrowthBenchmarks.weeklyVolunteerCoverageWatch) {
     items.push({
       label: "Capacity",
       title: `Pressure-test serving depth at ${weakestCoverage.campus}`,
-      detail: `Volunteer coverage is ${formatRatioPercent(weakestCoverage.volunteerRatio)}. Leadership should confirm whether the campus can absorb further growth without service quality slipping.`,
+      detail: `Weekly volunteer coverage is ${formatRatioPercent(weakestCoverage.volunteerRatio)}, below the ${formatRatioPercent(churchGrowthBenchmarks.weeklyVolunteerCoverageWatch)} watch line. Leadership should confirm whether the campus can absorb further growth without service quality slipping.`,
       priority: "This week",
     });
   }
@@ -799,11 +927,12 @@ function ScorePill({
   );
 }
 
-function RatioPill({ label, value }: { label: string; value: string }) {
+function RatioPill({ label, value, note }: { label: string; value: string; note?: string }) {
   return (
     <div className="rounded-2xl border border-gray-200 bg-white px-3 py-3">
       <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">{label}</p>
       <p className="mt-2 text-sm font-semibold text-slate-950">{value}</p>
+      {note && <p className="mt-1 text-[11px] font-medium text-gray-500">{note}</p>}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { AlertTriangle, ArrowDownRight, ArrowUpRight, CalendarDays, Sparkles, TrendingDown, TrendingUp } from "lucide-react";
-import type { DashboardInsights, EventNote } from "../lib/sunday-metrics";
+import { churchGrowthBenchmarks, type DashboardInsights, type EventNote } from "../lib/sunday-metrics";
 
 type InsightsPanelProps = {
   insights: DashboardInsights;
@@ -7,14 +7,15 @@ type InsightsPanelProps = {
 };
 
 export function InsightsPanel({ insights, events }: InsightsPanelProps) {
-  const { scorecard, executiveBrief, findings, trendAlerts, anomalies, health, latestDate, metricLabel, scopedCampuses } = insights;
+  const { scorecard, executiveBrief, actionCards, findings, trendAlerts, anomalies, health, latestDate, metricLabel, scopedCampuses } = insights;
   const hasAnyData =
-    !!scorecard || !!executiveBrief || findings.length > 0 || trendAlerts.length > 0 || anomalies.length > 0 || health.length > 0 || events.length > 0;
+    !!scorecard || !!executiveBrief || actionCards.length > 0 || findings.length > 0 || trendAlerts.length > 0 || anomalies.length > 0 || health.length > 0 || events.length > 0;
 
   return (
     <div className="space-y-6">
-      <GrowthScorecardCard scorecard={scorecard} />
       <ExecutiveBriefCard brief={executiveBrief} metricLabel={metricLabel} scopedCampuses={scopedCampuses} />
+      <OperatingAgendaCard cards={actionCards} />
+      <GrowthScorecardCard scorecard={scorecard} />
       <PriorityFindingsCard findings={findings} />
       <TrendWatchCard alerts={trendAlerts} />
       <AnomalyCard anomalies={anomalies} events={events} />
@@ -26,6 +27,84 @@ export function InsightsPanel({ insights, events }: InsightsPanelProps) {
         </div>
       )}
     </div>
+  );
+}
+
+function OperatingAgendaCard({ cards }: { cards: DashboardInsights["actionCards"] }) {
+  if (cards.length === 0) return null;
+
+  return (
+    <section className="rounded-[30px] border border-gray-200 bg-white p-6 lg:p-7">
+      <div className="flex items-start justify-between gap-3 border-b border-gray-200 pb-5">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Executive operating agenda</p>
+          <h2 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-950">Decisions that move the work</h2>
+          <p className="mt-2 text-xs leading-5 text-gray-500">Diagnosis, evidence, decision, action, and confirming data.</p>
+        </div>
+        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#fbfbfc] text-slate-700">
+          <Sparkles className="h-4 w-4" />
+        </div>
+      </div>
+
+      <div className="mt-4 space-y-4">
+        {cards.map((card) => (
+          <div key={`${card.campus}-${card.lens}-${card.title}`} className="rounded-2xl border border-gray-200 bg-[#fbfbfc] p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-950">{card.title}</p>
+                <p className="mt-1 text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">{card.lens}</p>
+              </div>
+              <span
+                className={[
+                  "inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap",
+                  card.urgency === "Decide now"
+                    ? "bg-rose-100 text-rose-700"
+                    : card.urgency === "This week"
+                      ? "bg-amber-100 text-amber-700"
+                      : "bg-slate-100 text-slate-700",
+                ].join(" ")}
+              >
+                {card.urgency}
+              </span>
+            </div>
+
+            <p className="mt-3 text-sm leading-6 text-slate-700">{card.diagnosis}</p>
+
+            <div className="mt-3 rounded-xl border border-gray-200 bg-white p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Working theory</p>
+              <p className="mt-1 text-sm leading-6 text-slate-800">{card.hypothesis}</p>
+            </div>
+
+            <div className="mt-3 rounded-xl border border-gray-200 bg-white p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Decision</p>
+              <p className="mt-1 text-sm leading-6 text-slate-800">{card.decision}</p>
+            </div>
+
+            <div className="mt-3 rounded-xl border border-gray-200 bg-white p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Next move</p>
+              <p className="mt-1 text-sm leading-6 text-slate-800">{card.nextMove}</p>
+            </div>
+
+            <div className="mt-3 space-y-2">
+              {card.evidence.slice(0, 3).map((item) => (
+                <p key={item} className="rounded-xl bg-white px-3 py-2 text-xs leading-5 text-gray-600">{item}</p>
+              ))}
+            </div>
+
+            <div className="mt-3 rounded-xl border border-dashed border-gray-200 bg-white p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Data to confirm</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {card.dataToConfirm.slice(0, 4).map((item) => (
+                  <span key={item} className="rounded-full bg-[#fbfbfc] px-2.5 py-1 text-[11px] font-medium text-slate-600">
+                    {item}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -202,7 +281,7 @@ function PriorityFindingsCard({ findings }: { findings: DashboardInsights["findi
                       : "bg-slate-100 text-slate-700",
                 ].join(" ")}
               >
-                {finding.tone === "positive" ? "Replicate" : finding.tone === "warning" ? "Action" : "Watch"}
+                {finding.lens}
               </span>
             </div>
             <p className="mt-2 text-sm leading-6 text-slate-700">{finding.detail}</p>
@@ -417,9 +496,24 @@ function HealthRatiosCard({ health, latestDate }: { health: DashboardInsights["h
               <p className="text-xs text-gray-500">{row.attendance.toLocaleString()} att.</p>
             </div>
             <div className="mt-2 grid grid-cols-3 gap-2 text-center">
-              <RatioStat label="Volunteer" value={row.volunteerRatio} benchmark={0.1} />
-              <RatioStat label="Kids" value={row.kidsRatio} benchmark={0.1} />
-              <RatioStat label="First-time" value={row.ftgRate} benchmark={0.01} />
+              <RatioStat
+                label="Volunteer"
+                value={row.volunteerRatio}
+                target={`Healthy ${formatRatioPercent(churchGrowthBenchmarks.weeklyVolunteerCoverageHealthy)}+`}
+                status={row.volunteerStatus}
+              />
+              <RatioStat
+                label="Kids"
+                value={row.kidsRatio}
+                target={`${formatRatioPercent(churchGrowthBenchmarks.kidsRatioMin)}-${formatRatioPercent(churchGrowthBenchmarks.kidsRatioMax)}`}
+                status={row.kidsStatus}
+              />
+              <RatioStat
+                label="First-time"
+                value={row.ftgRate}
+                target={`${formatRatioPercent(churchGrowthBenchmarks.firstTimeGuestRateMin)}-${formatRatioPercent(churchGrowthBenchmarks.firstTimeGuestRateMax)}`}
+                status={row.ftgStatus}
+              />
             </div>
           </div>
         ))}
@@ -428,15 +522,35 @@ function HealthRatiosCard({ health, latestDate }: { health: DashboardInsights["h
   );
 }
 
-function RatioStat({ label, value, benchmark }: { label: string; value: number; benchmark: number }) {
+function RatioStat({
+  label,
+  value,
+  target,
+  status,
+}: {
+  label: string;
+  value: number;
+  target: string;
+  status: "Strong" | "Healthy" | "Watch" | "Strained";
+}) {
   const pct = (value * 100).toFixed(1);
-  const ok = value >= benchmark;
+  const tone =
+    status === "Strong" || status === "Healthy"
+      ? "text-emerald-700"
+      : status === "Strained"
+        ? "text-rose-600"
+        : "text-amber-700";
   return (
     <div className="rounded-xl bg-white px-2 py-1.5">
       <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-400">{label}</p>
-      <p className={["mt-0.5 text-sm font-semibold", ok ? "text-slate-950" : "text-rose-600"].join(" ")}>{pct}%</p>
+      <p className={["mt-0.5 text-sm font-semibold", tone].join(" ")}>{pct}%</p>
+      <p className="mt-0.5 text-[10px] font-medium text-gray-400">{target}</p>
     </div>
   );
+}
+
+function formatRatioPercent(value: number) {
+  return `${(value * 100).toFixed(1)}%`;
 }
 
 function formatShortDate(iso: string) {

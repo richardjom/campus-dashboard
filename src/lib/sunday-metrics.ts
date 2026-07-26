@@ -29,6 +29,28 @@ export type ComparisonDatasetPoint = {
   total: number;
 };
 
+export const churchGrowthBenchmarks = {
+  yoyAttendanceGrowthTarget: 0.2,
+  firstTimeGuestRateMin: 0.02,
+  firstTimeGuestRateMax: 0.04,
+  kidsRatioMin: 0.2,
+  kidsRatioMax: 0.25,
+  weeklyVolunteerCoverageWatch: 0.14,
+  weeklyVolunteerCoverageHealthy: 0.16,
+  volunteerRosterTarget: 0.4,
+  growthTrackCompletionTarget: 0.75,
+  growthTrackToServeTarget: 0.8,
+  volunteerAnnualChurnTarget: 0.15,
+};
+
+export const executiveReportLenses = [
+  "Reach",
+  "Connection",
+  "Capacity",
+] as const;
+
+type ExecutiveReportLens = (typeof executiveReportLenses)[number] | "Seasonality" | "Leadership Context" | "Data Quality" | "Replication";
+
 type MetricsStoragePayload = {
   importedAt: string;
   metrics: SundayMetric[];
@@ -511,6 +533,9 @@ export type CampusHealth = {
   volunteerRatio: number;
   kidsRatio: number;
   ftgRate: number;
+  volunteerStatus: "Healthy" | "Watch" | "Strained";
+  kidsStatus: "Healthy" | "Watch" | "Strained";
+  ftgStatus: "Strong" | "Healthy" | "Watch";
 };
 
 export type ExecutiveBrief = {
@@ -523,6 +548,24 @@ export type ExecutiveFinding = {
   title: string;
   detail: string;
   tone: "positive" | "warning" | "neutral";
+  lens: ExecutiveReportLens;
+};
+
+type DiagnosticFinding = ExecutiveFinding & {
+  priorityScore: number;
+};
+
+export type ExecutiveActionCard = {
+  campus: string;
+  lens: ExecutiveReportLens;
+  urgency: "Decide now" | "This week" | "Monitor";
+  title: string;
+  diagnosis: string;
+  hypothesis: string;
+  evidence: string[];
+  decision: string;
+  nextMove: string;
+  dataToConfirm: string[];
 };
 
 export type GrowthVerdict = "Strong" | "Healthy" | "Watch" | "Critical";
@@ -564,6 +607,7 @@ export type ExecutiveScorecard = {
 export type DashboardInsights = {
   scorecard: ExecutiveScorecard | null;
   executiveBrief: ExecutiveBrief | null;
+  actionCards: ExecutiveActionCard[];
   findings: ExecutiveFinding[];
   trendAlerts: TrendAlert[];
   anomalies: AnomalyAlert[];
@@ -573,7 +617,7 @@ export type DashboardInsights = {
   metricLabel: string;
 };
 
-const insightMetrics: Array<{ field: keyof Pick<SundayMetric, "attendance" | "volunteers" | "first_time_guests" | "salvations" | "kids" | "growth_track">; label: string }> = [
+const insightMetrics: Array<{ field: MetricField; label: string }> = [
   { field: "attendance", label: "Attendance" },
   { field: "volunteers", label: "Volunteers" },
   { field: "first_time_guests", label: "First-time guests" },
@@ -603,10 +647,10 @@ export function getDashboardInsights(metrics: SundayMetric[], filters?: Comparis
     if (campusRecords.length < 8) continue;
 
     for (const { field, label } of insightMetrics) {
-      const fieldRecords = campusRecords.filter((record) => hasMetricField(record, field));
+      const fieldRecords = buildCampusMetricDateSeries(campusRecords, field);
       if (fieldRecords.length < 8) continue;
 
-      const values = fieldRecords.map((r) => r[field]);
+      const values = fieldRecords.map((r) => r.value);
       const recentValues = values.slice(-4).filter((v) => v > 0);
       const baselineValues = values.slice(-8, -4).filter((v) => v > 0);
 
@@ -633,17 +677,17 @@ export function getDashboardInsights(metrics: SundayMetric[], filters?: Comparis
         const last8 = fieldRecords.slice(-8);
         for (let i = 4; i < last8.length; i++) {
           const target = last8[i];
-          const window = last8.slice(Math.max(0, i - 4), i).map((r) => r.attendance).filter((v) => v > 0);
-          if (window.length < 3 || target.attendance === 0) continue;
+          const window = last8.slice(Math.max(0, i - 4), i).map((r) => r.value).filter((v) => v > 0);
+          if (window.length < 3 || target.value === 0) continue;
           const expected = mean(window);
           if (expected === 0) continue;
-          const deviationPct = Math.round(((target.attendance - expected) / expected) * 100);
+          const deviationPct = Math.round(((target.value - expected) / expected) * 100);
           if (Math.abs(deviationPct) >= 20) {
             anomalies.push({
               campus,
               date: target.service_date,
               metricLabel: label,
-              value: target.attendance,
+              value: target.value,
               expected: Math.round(expected),
               deviationPct,
               direction: deviationPct > 0 ? "spike" : "drop",
@@ -659,14 +703,21 @@ export function getDashboardInsights(metrics: SundayMetric[], filters?: Comparis
   const latestCompleteDate = getUniqueSortedDates(filterMetricsByFields(scopedMetrics, coreSnapshotFields)).at(-1) ?? null;
   if (latestCompleteDate) {
     for (const campus of campuses) {
-      const latest = scopedMetrics.find((m) => m.campus === campus && m.service_date === latestCompleteDate && hasMetricFields(m, coreSnapshotFields));
-      if (!latest || latest.attendance === 0) continue;
+      const latestRecords = scopedMetrics.filter((m) => m.campus === campus && m.service_date === latestCompleteDate && hasMetricFields(m, coreSnapshotFields));
+      const latest = aggregateTotals(latestRecords);
+      if (latest.attendance === 0) continue;
+      const volunteerRatio = latest.volunteers / latest.attendance;
+      const kidsRatio = latest.kids / latest.attendance;
+      const ftgRate = latest.first_time_guests / latest.attendance;
       health.push({
         campus,
         attendance: latest.attendance,
-        volunteerRatio: latest.volunteers / latest.attendance,
-        kidsRatio: latest.kids / latest.attendance,
-        ftgRate: latest.first_time_guests / latest.attendance,
+        volunteerRatio,
+        kidsRatio,
+        ftgRate,
+        volunteerStatus: classifyVolunteerCoverage(volunteerRatio),
+        kidsStatus: classifyKidsRatio(kidsRatio),
+        ftgStatus: classifyFirstTimeGuestRate(ftgRate),
       });
     }
   }
@@ -693,10 +744,14 @@ export function getDashboardInsights(metrics: SundayMetric[], filters?: Comparis
   const findings = filters
     ? buildExecutiveFindings(scopedMetrics, filters, campuses)
     : [];
+  const actionCards = filters
+    ? buildExecutiveActionCards(scopedMetrics, filters, campuses)
+    : [];
 
   return {
     scorecard,
     executiveBrief,
+    actionCards,
     findings,
     trendAlerts: trendAlerts.slice(0, 6),
     anomalies: anomalies.slice(0, 5),
@@ -717,6 +772,38 @@ function stdDev(values: number[]): number {
   const avg = mean(values);
   const variance = mean(values.map((value) => (value - avg) ** 2));
   return Math.sqrt(variance);
+}
+
+function buildCampusMetricDateSeries(records: SundayMetric[], field: MetricField): Array<{ service_date: string; value: number }> {
+  const totalsByDate = new Map<string, number>();
+
+  records
+    .filter((record) => hasMetricField(record, field))
+    .forEach((record) => {
+      totalsByDate.set(record.service_date, (totalsByDate.get(record.service_date) ?? 0) + record[field]);
+    });
+
+  return Array.from(totalsByDate.entries())
+    .map(([service_date, value]) => ({ service_date, value }))
+    .sort((left, right) => left.service_date.localeCompare(right.service_date));
+}
+
+function classifyVolunteerCoverage(value: number): CampusHealth["volunteerStatus"] {
+  if (value >= churchGrowthBenchmarks.weeklyVolunteerCoverageHealthy) return "Healthy";
+  if (value >= churchGrowthBenchmarks.weeklyVolunteerCoverageWatch) return "Watch";
+  return "Strained";
+}
+
+function classifyKidsRatio(value: number): CampusHealth["kidsStatus"] {
+  if (value >= churchGrowthBenchmarks.kidsRatioMin && value <= churchGrowthBenchmarks.kidsRatioMax) return "Healthy";
+  if (value >= churchGrowthBenchmarks.kidsRatioMin * 0.8 && value <= churchGrowthBenchmarks.kidsRatioMax * 1.15) return "Watch";
+  return "Strained";
+}
+
+function classifyFirstTimeGuestRate(value: number): CampusHealth["ftgStatus"] {
+  if (value >= churchGrowthBenchmarks.firstTimeGuestRateMax) return "Strong";
+  if (value >= churchGrowthBenchmarks.firstTimeGuestRateMin) return "Healthy";
+  return "Watch";
 }
 
 type PeriodPerformanceSummary = {
@@ -752,6 +839,8 @@ function buildExecutiveScorecard(
       seasonalDelta: campusPerformance.seasonalDelta,
       volatility,
       volunteerRatio: profile?.volunteerRatio ?? null,
+      kidsRatio: profile?.kidsRatio ?? null,
+      ftgRate: profile?.ftgRate ?? null,
     });
 
     return {
@@ -777,11 +866,23 @@ function buildExecutiveScorecard(
         .map((campus) => buildCampusProfile(metrics, campus, filters.periodA, filters.periodB)?.volunteerRatio ?? 0)
         .filter((ratio) => ratio > 0),
     ) || null,
+    kidsRatio: avgNumber(
+      campuses
+        .map((campus) => buildCampusProfile(metrics, campus, filters.periodA, filters.periodB)?.kidsRatio ?? 0)
+        .filter((ratio) => ratio > 0),
+    ) || null,
+    ftgRate: avgNumber(
+      campuses
+        .map((campus) => buildCampusProfile(metrics, campus, filters.periodA, filters.periodB)?.ftgRate ?? 0)
+        .filter((ratio) => ratio > 0),
+    ) || null,
   });
 
   const dataCaveat = buildScorecardCaveat(performance, transitions);
+  const metricLabel = getMetricLabel(filters.metric).toLowerCase();
   const summaryParts = [
-    `The selected scope is ${portfolioVerdict.verdict.toLowerCase()} for ${getMetricLabel(filters.metric).toLowerCase()} right now, moving ${performance.currentChange > 0 ? "up" : performance.currentChange < 0 ? "down" : "flat"} ${Math.abs(performance.currentChange)}% versus the comparable prior period.`,
+    `Using the Reach, Connection, and Capacity framework, the selected scope is ${portfolioVerdict.verdict.toLowerCase()} for ${metricLabel} right now, moving ${performance.currentChange > 0 ? "up" : performance.currentChange < 0 ? "down" : "flat"} ${Math.abs(performance.currentChange)}% versus the comparable prior period.`,
+    `The reach benchmark is 20% year-over-year growth, while connection and capacity are checked against first-time guest flow, kids/family mix, Growth Track activity, and weekly volunteer coverage.`,
     performance.acceleration !== null
       ? `Growth speed is ${performance.acceleration > 2 ? "accelerating" : performance.acceleration < -2 ? "slowing" : "holding roughly steady"}${performance.priorChange !== null ? `, after ${performance.priorChange > 0 ? "+" : ""}${performance.priorChange}% in the prior comparison cycle` : ""}.`
       : `Growth speed cannot be fully measured yet because there is not enough earlier history for a second comparison layer.`,
@@ -900,17 +1001,23 @@ function classifyGrowthVerdict({
   seasonalDelta,
   volatility,
   volunteerRatio,
+  kidsRatio,
+  ftgRate,
 }: {
   currentChange: number;
   acceleration: number | null;
   seasonalDelta: number | null;
   volatility: number;
   volunteerRatio: number | null;
+  kidsRatio: number | null;
+  ftgRate: number | null;
 }) {
   let score = 0;
 
-  if (currentChange >= 8) score += 2;
+  if (currentChange >= churchGrowthBenchmarks.yoyAttendanceGrowthTarget * 100) score += 3;
+  else if (currentChange >= 8) score += 2;
   else if (currentChange >= 2) score += 1;
+  else if (currentChange <= -10) score -= 3;
   else if (currentChange <= -8) score -= 2;
   else if (currentChange <= -2) score -= 1;
 
@@ -925,17 +1032,21 @@ function classifyGrowthVerdict({
   }
 
   if (volatility >= 18) score -= 1;
-  if (volunteerRatio !== null && volunteerRatio > 0 && volunteerRatio < 0.14 && currentChange > 0) score -= 1;
+  if (volunteerRatio !== null && volunteerRatio > 0 && volunteerRatio < churchGrowthBenchmarks.weeklyVolunteerCoverageWatch) score -= 1;
+  if (kidsRatio !== null && kidsRatio > 0 && (kidsRatio < churchGrowthBenchmarks.kidsRatioMin * 0.8 || kidsRatio > churchGrowthBenchmarks.kidsRatioMax * 1.15)) score -= 1;
+  if (ftgRate !== null && ftgRate > 0 && ftgRate < churchGrowthBenchmarks.firstTimeGuestRateMin) score -= 1;
 
   const verdict: GrowthVerdict =
     score >= 3 ? "Strong" : score >= 1 ? "Healthy" : score <= -3 ? "Critical" : "Watch";
 
   const reasonParts = [
     currentChange >= 8
-      ? "topline growth is clearly above baseline"
+      ? currentChange >= churchGrowthBenchmarks.yoyAttendanceGrowthTarget * 100
+        ? "reach is meeting or exceeding the 20% year-over-year growth target"
+        : "reach is clearly above the prior baseline"
       : currentChange <= -8
-        ? "topline growth is materially below baseline"
-        : "topline growth is present but not decisive",
+        ? "reach is materially below the prior baseline"
+        : "reach is present but not decisive",
     acceleration !== null
       ? acceleration >= 5
         ? "growth speed is improving"
@@ -951,8 +1062,14 @@ function classifyGrowthVerdict({
           : "seasonal performance is close to normal"
       : "seasonal history is limited",
     volatility >= 18 ? "week-to-week volatility is elevated" : "execution consistency is acceptable",
-    volunteerRatio !== null && volunteerRatio > 0 && volunteerRatio < 0.14
-      ? "volunteer coverage is thin for the current load"
+    volunteerRatio !== null && volunteerRatio > 0 && volunteerRatio < churchGrowthBenchmarks.weeklyVolunteerCoverageWatch
+      ? "capacity is thin because weekly volunteer coverage is below the watch line"
+      : null,
+    kidsRatio !== null && kidsRatio > 0 && kidsRatio > churchGrowthBenchmarks.kidsRatioMax * 1.15
+      ? "kids ministry demand is above the 20-25% family-health range and should be capacity-checked"
+      : null,
+    ftgRate !== null && ftgRate > 0 && ftgRate < churchGrowthBenchmarks.firstTimeGuestRateMin
+      ? "connection is soft because first-time guest flow is below the 2-4% target range"
       : null,
   ].filter(Boolean);
 
@@ -979,6 +1096,8 @@ function buildScorecardCaveat(
   if (transitions.length === 0) {
     caveats.push("No campus pastor or staff transitions are logged for this window yet.");
   }
+
+  caveats.push("Volunteer health is using weekly serving counts as a proxy; the 40% roster benchmark needs roster-level Planning Center data before it can be scored directly.");
 
   return caveats.join(" ");
 }
@@ -1114,6 +1233,7 @@ function buildExecutiveBrief(
   const trendPct = firstPoint && lastPoint && firstPoint.total > 0
     ? Math.round(((lastPoint.total - firstPoint.total) / firstPoint.total) * 100)
     : 0;
+  const diagnosticRead = buildDiagnosticFindings(metrics, filters, campuses)[0] ?? null;
 
   if (campuses.length === 1) {
     const campus = campuses[0];
@@ -1143,6 +1263,8 @@ function buildExecutiveBrief(
       seasonalDelta !== null
         ? `Against the same seasonal window in older years, this campus is ${seasonalDelta > 0 ? "running above" : seasonalDelta < 0 ? "running below" : "tracking in line with"} baseline by ${Math.abs(seasonalDelta)}%.`
         : null,
+      diagnosticRead ? `Diagnostic read: ${diagnosticRead.detail}` : null,
+      `Research lens: reach is judged against the campus's own prior baseline, connection is judged by first-time guest and Growth Track movement, and capacity is judged by weekly volunteer and kids pressure.`,
       profile.growthTrackComparable
         ? `Volunteer coverage is ${formatRatio(profile.volunteerRatio)} and guest-to-Growth-Track next-step conversion is ${(profile.growthTrackRate * 100).toFixed(1)}%.`
         : `Volunteer coverage is ${formatRatio(profile.volunteerRatio)}. Growth Track volume is higher than first-time guest volume in this period, so it should be read as broader next-step activity rather than a direct guest conversion rate.`,
@@ -1193,6 +1315,8 @@ function buildExecutiveBrief(
     seasonalDelta !== null
       ? `Relative to the same seasonal window in older years, the selected scope is ${seasonalDelta > 0 ? "above" : seasonalDelta < 0 ? "below" : "in line with"} baseline by ${Math.abs(seasonalDelta)}%.`
       : null,
+    diagnosticRead ? `Diagnostic read: ${diagnosticRead.detail}` : null,
+    `The executive read uses three research-backed lenses: Reach (attendance and guest flow), Connection (next steps and response), and Capacity (volunteers, kids, and service load).`,
     topShare > 0.4
       ? `${top.campus} contributes ${Math.round(topShare * 100)}% of the scoped total, so the current performance base is still concentrated.`
       : `No single campus is dominating the scoped total, which reduces concentration risk and makes the trend more structurally balanced.`,
@@ -1222,6 +1346,7 @@ function buildExecutiveFindings(
 ): ExecutiveFinding[] {
   if (campuses.length === 0) return [];
 
+  const diagnosticFindings = buildDiagnosticFindings(metrics, filters, campuses);
   const opportunities = buildOpportunities(metrics, { ...filters, selectedCampuses: campuses });
   const mapped = opportunities.slice(0, 3).map((opportunity) => ({
     title: opportunity.title,
@@ -1232,10 +1357,17 @@ function buildExecutiveFindings(
         : opportunity.severity === "high" || opportunity.severity === "medium"
           ? "warning"
           : "neutral",
+    lens: getOpportunityLens(opportunity),
   } satisfies ExecutiveFinding));
 
-  if (mapped.length > 0) {
-    return mapped;
+  if (diagnosticFindings.length > 0 || mapped.length > 0) {
+    const combined = [...diagnosticFindings, ...mapped];
+    const seenTitles = new Set<string>();
+    return combined.filter((finding) => {
+      if (seenTitles.has(finding.title)) return false;
+      seenTitles.add(finding.title);
+      return true;
+    }).slice(0, 4);
   }
 
   const metricLabel = getMetricLabel(filters.metric).toLowerCase();
@@ -1253,7 +1385,593 @@ function buildExecutiveFindings(
       ? `The selected scope is at ${currentTotal.toLocaleString()} ${metricLabel} versus ${priorTotal.toLocaleString()} in ${formatPeriodShort(priorPeriod!)} (${change > 0 ? "+" : ""}${change}%). With no stronger anomaly or funnel break present, the main leadership question is whether that change is durable and operationally supported.`
       : `The selected scope is at ${currentTotal.toLocaleString()} ${metricLabel}. A prior comparable baseline was not available, so the immediate next step is to establish the right historical benchmark before over-interpreting the current number.`,
     tone: change >= 5 ? "positive" : change <= -5 ? "warning" : "neutral",
+    lens: "Reach",
   }];
+}
+
+function buildDiagnosticFindings(
+  metrics: SundayMetric[],
+  filters: ComparisonFilters,
+  campuses: string[],
+): DiagnosticFinding[] {
+  return campuses
+    .map((campus) => buildCampusDiagnosticFinding(metrics, filters, campus))
+    .filter((finding): finding is DiagnosticFinding => finding !== null)
+    .sort((left, right) => {
+      const toneWeight = (finding: DiagnosticFinding) => finding.tone === "warning" ? 2 : finding.tone === "neutral" ? 1 : 0;
+      const toneDiff = toneWeight(right) - toneWeight(left);
+      if (toneDiff !== 0) return toneDiff;
+      return right.priorityScore - left.priorityScore;
+    })
+    .slice(0, campuses.length === 1 ? 1 : 2);
+}
+
+function buildExecutiveActionCards(
+  metrics: SundayMetric[],
+  filters: ComparisonFilters,
+  campuses: string[],
+): ExecutiveActionCard[] {
+  return campuses
+    .map((campus) => buildCampusExecutiveActionCard(metrics, filters, campus))
+    .filter((card): card is ExecutiveActionCard => card !== null)
+    .sort((left, right) => {
+      const urgencyRank: Record<ExecutiveActionCard["urgency"], number> = {
+        "Decide now": 0,
+        "This week": 1,
+        Monitor: 2,
+      };
+      return urgencyRank[left.urgency] - urgencyRank[right.urgency];
+    })
+    .slice(0, campuses.length === 1 ? 2 : 4);
+}
+
+function buildCampusExecutiveActionCard(
+  metrics: SundayMetric[],
+  filters: ComparisonFilters,
+  campus: string,
+): ExecutiveActionCard | null {
+  const profile = buildCampusProfile(metrics, campus, filters.periodA, filters.periodB);
+  if (!profile) return null;
+
+  const performance = summarizePeriodPerformance(metrics, [campus], filters.periodA, filters.metric, filters.periodB);
+  const transitions = getTransitionContextEvents(metrics, [campus], filters.periodA, filters.periodB);
+  const diagnosis = classifyDiagnosticPressure(profile, performance, transitions.length > 0);
+  const concentration = describeChangeConcentration(metrics, campus, filters, performance.priorPeriod);
+  const priorLabel = performance.priorPeriod ? formatPeriodShort(performance.priorPeriod) : "prior comparable period";
+  const urgency = getActionUrgency(diagnosis.lens, diagnosis.tone, performance.currentChange, profile);
+  const evidence = [
+    `${formatPeriodShort(filters.periodA)} is ${formatDirectionalChange(performance.currentChange)} versus ${priorLabel}.`,
+    performance.acceleration !== null ? `Growth speed is ${formatSignedNumber(performance.acceleration)} pts versus the prior cycle.` : null,
+    performance.seasonalDelta !== null ? `Seasonal baseline is ${formatSignedWholePercent(performance.seasonalDelta)} versus older comparable windows.` : null,
+    concentration?.sentence,
+    profile.volunteerRatio > 0 ? `Weekly volunteer coverage is ${formatRatio(profile.volunteerRatio)}.` : null,
+    profile.kidsRatio > 0 ? `Kids ratio is ${formatRatio(profile.kidsRatio)}.` : null,
+    profile.ftgRate > 0 ? `First-time guest rate is ${formatRatio(profile.ftgRate)}.` : null,
+    profile.growthTrackComparable && profile.firstTimeGuests > 0
+      ? `Directional guest-to-Growth-Track rate is ${(profile.growthTrackRate * 100).toFixed(1)}%.`
+      : profile.growthTrack > profile.firstTimeGuests && profile.firstTimeGuests > 0
+        ? `Growth Track exceeds first-time guest volume, so it cannot be treated as literal guest conversion.`
+        : null,
+    transitions[0] ? `${transitions[0].type} context exists: ${transitions[0].note}` : null,
+  ].filter((item): item is string => Boolean(item));
+
+  return {
+    campus,
+    lens: diagnosis.lens,
+    urgency,
+    title: buildActionTitle(campus, diagnosis.lens),
+    diagnosis: buildActionDiagnosis(campus, diagnosis, profile, performance),
+    hypothesis: buildActionHypothesis(campus, diagnosis.lens, profile, performance, concentration, transitions.length > 0),
+    evidence: evidence.slice(0, 5),
+    decision: buildActionDecision(campus, diagnosis.lens),
+    nextMove: buildActionNextMove(campus, diagnosis.lens),
+    dataToConfirm: buildActionDataNeeds(diagnosis.lens),
+  };
+}
+
+function getActionUrgency(
+  lens: ExecutiveReportLens,
+  tone: ExecutiveFinding["tone"],
+  currentChange: number,
+  profile: CampusProfile,
+): ExecutiveActionCard["urgency"] {
+  if (
+    tone === "warning" &&
+    (currentChange <= -8 ||
+      lens === "Capacity" ||
+      (profile.volunteerRatio > 0 && profile.volunteerRatio < churchGrowthBenchmarks.weeklyVolunteerCoverageWatch))
+  ) {
+    return "Decide now";
+  }
+
+  if (tone === "warning" || lens === "Connection" || lens === "Seasonality") {
+    return "This week";
+  }
+
+  return "Monitor";
+}
+
+function buildActionTitle(campus: string, lens: ExecutiveReportLens) {
+  switch (lens) {
+    case "Capacity":
+      return `${campus}: protect service capacity before pushing growth`;
+    case "Connection":
+      return `${campus}: tighten the next-step pathway`;
+    case "Reach":
+      return `${campus}: rebuild reach momentum`;
+    case "Seasonality":
+      return `${campus}: prepare a low-season countermeasure`;
+    case "Leadership Context":
+      return `${campus}: interpret the trend through leadership change`;
+    case "Replication":
+      return `${campus}: document what is working`;
+    default:
+      return `${campus}: improve data confidence before major decisions`;
+  }
+}
+
+function buildActionDiagnosis(
+  campus: string,
+  diagnosis: ReturnType<typeof classifyDiagnosticPressure>,
+  profile: CampusProfile,
+  performance: PeriodPerformanceSummary,
+) {
+  const movement = formatDirectionalChange(performance.currentChange);
+
+  switch (diagnosis.lens) {
+    case "Capacity":
+      return `${campus} is ${movement}, but the more useful leadership read is whether the campus can carry the current load. Volunteer coverage, kids demand, and service execution should be treated as the operating constraint.`;
+    case "Connection":
+      return `${campus} is ${movement}, and the concern is not just attendance. The report is pointing to a pathway issue: response, Growth Track, or follow-up may not be converting people into durable engagement.`;
+    case "Reach":
+      return `${campus} is ${movement}, and the strongest current signal is top-of-funnel softness. Attendance and first-time guest flow need a focused reach response before assuming the issue is internal operations.`;
+    case "Seasonality":
+      return `${campus} is ${movement}, and the selected window is under historical rhythm. Treat this as a seasonal-performance problem unless upcoming context proves it is structural.`;
+    case "Leadership Context":
+      return `${campus} is ${movement}, but the trend should be read through known transition context before assigning the cause to programming, outreach, or execution.`;
+    case "Replication":
+      return `${campus} is ${movement} with no obvious capacity or connection warning. The question is not whether it is good; it is what practice should be preserved and transferred.`;
+    default:
+      return `${campus} is ${movement}. The current metrics are not enough to name a strong cause; add context and cohort data before making a major operating call. ${profile.attendance.toLocaleString()} attendance is the base for this read.`;
+  }
+}
+
+function buildActionHypothesis(
+  campus: string,
+  lens: ExecutiveReportLens,
+  profile: CampusProfile,
+  performance: PeriodPerformanceSummary,
+  concentration: ChangeConcentration | null,
+  hasTransitionContext: boolean,
+) {
+  const movement = formatDirectionalChange(performance.currentChange);
+  const concentrationRead = concentration?.sentence ? ` ${concentration.sentence}` : "";
+
+  switch (lens) {
+    case "Capacity": {
+      const volunteerSignal =
+        profile.volunteerRatio > 0 && profile.volunteerRatio < churchGrowthBenchmarks.weeklyVolunteerCoverageWatch
+          ? `volunteer coverage is under the operating watch line at ${formatRatio(profile.volunteerRatio)}`
+          : `kids/service load is the clearest pressure point`;
+      return `Working theory: ${campus} is ${movement}, but the constraint may be capacity more than demand because ${volunteerSignal}.${concentrationRead} Before funding more reach, confirm whether Sunday teams can preserve experience quality at the current load.`;
+    }
+    case "Connection": {
+      const growthTrackRead =
+        profile.growthTrackComparable && profile.firstTimeGuests > 0
+          ? `Growth Track activity is ${(profile.growthTrackRate * 100).toFixed(1)}% of first-time guest volume`
+          : profile.growthTrack > profile.firstTimeGuests && profile.firstTimeGuests > 0
+            ? `Growth Track volume exceeds first-time guest volume, so it should be read as broader discipleship activity, not literal guest conversion`
+            : `next-step conversion needs cohort-level confirmation`;
+      return `Working theory: ${campus} may have a pathway issue more than a pure attendance issue. ${growthTrackRead}; the next question is whether people are being followed up quickly, invited clearly, and handed from Sunday attendance into Growth Track, baptism, serving, or groups.`;
+    }
+    case "Reach":
+      return `Working theory: ${campus} needs more top-of-funnel pressure. The read is ${movement}, and first-time guest flow is ${profile.ftgRate > 0 ? formatRatio(profile.ftgRate) : "not yet visible"} of attendance, so the immediate test is whether invitation, outreach, events, or service-time promotion can create new guest volume.${concentrationRead}`;
+    case "Seasonality":
+      return `Working theory: this may be a predictable seasonal or event-cycle pattern rather than a structural decline. Compare this window to the same weeks across the last three years, especially around Big 5 Sundays, school calendars, and post-event falloff, before assigning blame to campus execution.`;
+    case "Leadership Context":
+      return `Working theory: the numbers need to be interpreted through transition context. ${hasTransitionContext ? "A leadership or staff transition is already logged" : "A transition may not be logged yet"}, so the next read should compare pre-transition, transition, and stabilization windows before setting performance expectations.`;
+    case "Replication":
+      return `Working theory: ${campus} is showing transferable strength, not just statistical noise. The task is to identify which practices created durable momentum and which ones depend on local leadership, event timing, or campus-specific conditions.`;
+    default:
+      return `Working theory: the current dataset is directionally useful but not causal. Add cohort, service-time, staff-transition, and ministry-owner context before making a major resource decision.`;
+  }
+}
+
+function buildActionDecision(campus: string, lens: ExecutiveReportLens) {
+  switch (lens) {
+    case "Capacity":
+      return `Decide whether ${campus} should slow promotional pressure until serve teams, kids rooms, and service support are confirmed healthy.`;
+    case "Connection":
+      return `Decide who owns the next-step funnel at ${campus}: guest follow-up, Growth Track invitation, baptism response, and serve handoff.`;
+    case "Reach":
+      return `Decide what reach lever ${campus} will use next: invitation series, event promotion, local outreach, or service-time campaign.`;
+    case "Seasonality":
+      return `Decide whether to accept the seasonal dip or fund a counter-seasonal push with a clear attendance and guest target.`;
+    case "Leadership Context":
+      return `Decide what transition support ${campus} needs and what performance window should be used before evaluating the new normal.`;
+    case "Replication":
+      return `Decide which practice from ${campus} is worth documenting and testing elsewhere.`;
+    default:
+      return `Decide what data must be added before leadership treats this read as causal.`;
+  }
+}
+
+function buildActionNextMove(campus: string, lens: ExecutiveReportLens) {
+  switch (lens) {
+    case "Capacity":
+      return `Run a 7-day capacity audit by service: volunteer check-ins, kids room load, first-impressions coverage, parking, and auditorium fill.`;
+    case "Connection":
+      return `Audit the last 25 first-time guests from ${campus}: follow-up timing, second visit, Growth Track invite, Growth Track attendance, and serve/baptism step.`;
+    case "Reach":
+      return `Build a 4-week reach plan with one measurable hook, one owner, and weekly tracking for attendance, first-time guests, and invite source.`;
+    case "Seasonality":
+      return `Map this window against the last three years, school calendars, Big 5 events, and sermon series so the team knows what dip is normal.`;
+    case "Leadership Context":
+      return `Create a transition note: what changed, when it changed, expected stabilization window, and what support the campus needs.`;
+    case "Replication":
+      return `Interview the campus lead and two ministry owners this week; capture the repeatable behaviors behind the trend.`;
+    default:
+      return `Add missing context notes and cohort fields before the next executive review.`;
+  }
+}
+
+function buildActionDataNeeds(lens: ExecutiveReportLens) {
+  switch (lens) {
+    case "Capacity":
+      return ["Volunteer roster by team/service", "Weekly serve check-ins", "Kids room capacity", "Service fill rate"];
+    case "Connection":
+      return ["First-time guest follow-up status", "Second-visit date", "Growth Track signup/completion", "Baptism and serve handoff"];
+    case "Reach":
+      return ["Invite source", "Campaign/event calendar", "Local outreach dates", "Service-time attendance trend"];
+    case "Seasonality":
+      return ["Three-year same-week baseline", "Big 5 event windows", "School/holiday calendar", "Weather or cancellation notes"];
+    case "Leadership Context":
+      return ["Campus pastor/staff transition log", "Pre/post transition window", "Coverage plan", "Known morale or staffing risks"];
+    case "Replication":
+      return ["Ministry practice notes", "Volunteer onboarding cadence", "Guest follow-up workflow", "Event or series strategy"];
+    default:
+      return ["Context notes", "Person-level cohorts", "Ministry owner annotations", "Data quality review"];
+  }
+}
+
+function buildCampusDiagnosticFinding(
+  metrics: SundayMetric[],
+  filters: ComparisonFilters,
+  campus: string,
+): DiagnosticFinding | null {
+  const profile = buildCampusProfile(metrics, campus, filters.periodA, filters.periodB);
+  if (!profile) return null;
+
+  const performance = summarizePeriodPerformance(metrics, [campus], filters.periodA, filters.metric, filters.periodB);
+  const priorLabel = performance.priorPeriod ? formatPeriodShort(performance.priorPeriod) : "the prior comparable period";
+  const metricLabel = getMetricLabel(filters.metric).toLowerCase();
+  const concentration = describeChangeConcentration(metrics, campus, filters, performance.priorPeriod);
+  const transitions = getTransitionContextEvents(metrics, [campus], filters.periodA, filters.periodB);
+  const diagnosis = classifyDiagnosticPressure(profile, performance, transitions.length > 0);
+  const issueLabel = diagnosis.lens.toLowerCase();
+
+  const parts = [
+    `${campus} is ${formatDirectionalChange(performance.currentChange)} versus ${priorLabel} for ${metricLabel}.`,
+    concentration?.sentence,
+    buildCapacityDiagnosticSentence(profile),
+    buildConnectionDiagnosticSentence(profile),
+    buildReachDiagnosticSentence(profile),
+    transitions.length > 0
+      ? `${transitions[0].type} is logged ${transitions[0].timing.toLowerCase()} on ${formatShortDateLabel(transitions[0].date)}, so this read should be reviewed against that leadership context.`
+      : null,
+    `This points ${diagnosis.certainty} to a ${issueLabel} issue: ${diagnosis.reason}`,
+  ].filter(Boolean);
+
+  return {
+    title: `${campus} diagnostic read`,
+    detail: parts.join(" "),
+    tone: diagnosis.tone,
+    lens: diagnosis.lens,
+    priorityScore: Math.abs(performance.currentChange) + diagnosis.priorityBoost + (concentration?.priorityBoost ?? 0),
+  };
+}
+
+function classifyDiagnosticPressure(
+  profile: CampusProfile,
+  performance: PeriodPerformanceSummary,
+  hasTransitionContext: boolean,
+): { lens: ExecutiveReportLens; tone: ExecutiveFinding["tone"]; reason: string; certainty: "most strongly" | "partly" | "more than"; priorityBoost: number } {
+  const capacityPressure =
+    (profile.volunteerRatio > 0 && profile.volunteerRatio < churchGrowthBenchmarks.weeklyVolunteerCoverageWatch) ||
+    (profile.kidsRatio > 0 && profile.kidsRatio > churchGrowthBenchmarks.kidsRatioMax * 1.15);
+  const connectionPressure =
+    (profile.growthTrackComparable && profile.firstTimeGuests >= 20 && profile.growthTrackRate < 0.2) ||
+    profile.salvationGrowth < -5;
+  const reachPressure =
+    performance.currentChange <= -5 ||
+    (profile.ftgRate > 0 && profile.ftgRate < churchGrowthBenchmarks.firstTimeGuestRateMin);
+
+  if (capacityPressure) {
+    return {
+      lens: "Capacity",
+      tone: "warning",
+      reason: "attendance movement should not be interpreted apart from serving depth, kids load, and service-execution pressure.",
+      certainty: connectionPressure || reachPressure ? "more than" : "most strongly",
+      priorityBoost: 18,
+    };
+  }
+
+  if (connectionPressure) {
+    return {
+      lens: "Connection",
+      tone: "warning",
+      reason: "people may be present or visiting, but the pathway into response, Growth Track, or next steps is not keeping pace.",
+      certainty: reachPressure ? "more than" : "most strongly",
+      priorityBoost: 16,
+    };
+  }
+
+  if (performance.seasonalDelta !== null && performance.seasonalDelta <= -5) {
+    return {
+      lens: "Seasonality",
+      tone: "warning",
+      reason: "the selected window is under its own historical seasonal rhythm, so the next question is whether this is a predictable low-season dip or an avoidable execution miss.",
+      certainty: reachPressure ? "partly" : "most strongly",
+      priorityBoost: 12,
+    };
+  }
+
+  if (reachPressure) {
+    return {
+      lens: "Reach",
+      tone: "warning",
+      reason: "attendance and/or first-time guest flow is softer than the campus's own baseline, before the data shows a clearer connection or capacity bottleneck.",
+      certainty: "most strongly",
+      priorityBoost: 14,
+    };
+  }
+
+  if (hasTransitionContext) {
+    return {
+      lens: "Leadership Context",
+      tone: "neutral",
+      reason: "the numbers are not flashing a hard operational warning, but leadership changes should be used to interpret the slope and volatility.",
+      certainty: "partly",
+      priorityBoost: 6,
+    };
+  }
+
+  return {
+    lens: performance.currentChange >= 5 ? "Replication" : "Data Quality",
+    tone: performance.currentChange >= 5 ? "positive" : "neutral",
+    reason: performance.currentChange >= 5
+      ? "the campus is above its own baseline without an obvious capacity or connection warning, so the practical question is what should be preserved and replicated."
+      : "the core data is stable enough that deeper explanation will require context notes, cohort data, and ministry-specific inputs.",
+    certainty: "partly",
+    priorityBoost: performance.currentChange >= 5 ? 8 : 2,
+  };
+}
+
+function buildCapacityDiagnosticSentence(profile: CampusProfile): string {
+  const sentences: string[] = [];
+
+  if (profile.volunteerRatio > 0) {
+    const volunteerStatus =
+      profile.volunteerRatio < churchGrowthBenchmarks.weeklyVolunteerCoverageWatch
+        ? `below the ${formatRatio(churchGrowthBenchmarks.weeklyVolunteerCoverageWatch)} watch line`
+        : profile.volunteerRatio < churchGrowthBenchmarks.weeklyVolunteerCoverageHealthy
+          ? `between the watch line and the ${formatRatio(churchGrowthBenchmarks.weeklyVolunteerCoverageHealthy)} healthy line`
+          : `above the ${formatRatio(churchGrowthBenchmarks.weeklyVolunteerCoverageHealthy)} healthy line`;
+    sentences.push(`Weekly volunteer coverage is ${formatRatio(profile.volunteerRatio)}, ${volunteerStatus}.`);
+  }
+
+  if (profile.kidsRatio > 0) {
+    const kidsStatus =
+      profile.kidsRatio >= churchGrowthBenchmarks.kidsRatioMin && profile.kidsRatio <= churchGrowthBenchmarks.kidsRatioMax
+        ? "inside"
+        : "outside";
+    sentences.push(`Kids are ${formatRatio(profile.kidsRatio)} of attendance, ${kidsStatus} the ${formatRatio(churchGrowthBenchmarks.kidsRatioMin)}-${formatRatio(churchGrowthBenchmarks.kidsRatioMax)} family-health range.`);
+  }
+
+  return sentences.join(" ");
+}
+
+function buildConnectionDiagnosticSentence(profile: CampusProfile): string | null {
+  if (profile.firstTimeGuests <= 0 && profile.salvations <= 0 && profile.growthTrack <= 0) {
+    return null;
+  }
+
+  const parts = [
+    profile.firstTimeGuests > 0
+      ? `First-time guests are ${formatRatio(profile.ftgRate)} of attendance`
+      : null,
+    profile.growthTrackComparable && profile.firstTimeGuests > 0
+      ? `Growth Track is running at a directional ${(profile.growthTrackRate * 100).toFixed(1)}% of first-time guest volume`
+      : profile.growthTrack > profile.firstTimeGuests && profile.firstTimeGuests > 0
+        ? `Growth Track exceeds first-time guest volume, so it should be treated as broader next-step activity rather than literal guest conversion`
+        : null,
+    profile.salvationGrowth !== 0
+      ? `salvations are ${formatPct(profile.salvationGrowth)} versus the comparable period`
+      : null,
+  ].filter(Boolean);
+
+  return parts.length > 0 ? `${parts.join("; ")}.` : null;
+}
+
+function buildReachDiagnosticSentence(profile: CampusProfile): string {
+  const ftgStatus =
+    profile.ftgRate <= 0
+      ? "first-time guest flow is not available in this slice"
+      : profile.ftgRate < churchGrowthBenchmarks.firstTimeGuestRateMin
+        ? `first-time guest flow is below the ${formatRatio(churchGrowthBenchmarks.firstTimeGuestRateMin)}-${formatRatio(churchGrowthBenchmarks.firstTimeGuestRateMax)} reach range`
+        : profile.ftgRate <= churchGrowthBenchmarks.firstTimeGuestRateMax
+          ? `first-time guest flow is inside the ${formatRatio(churchGrowthBenchmarks.firstTimeGuestRateMin)}-${formatRatio(churchGrowthBenchmarks.firstTimeGuestRateMax)} reach range`
+          : `first-time guest flow is above the ${formatRatio(churchGrowthBenchmarks.firstTimeGuestRateMin)}-${formatRatio(churchGrowthBenchmarks.firstTimeGuestRateMax)} reach range`;
+
+  return `Reach read: attendance is ${formatPct(profile.attendanceGrowth)} versus the comparable period, and ${ftgStatus}.`;
+}
+
+type ChangeConcentration = {
+  sentence: string;
+  priorityBoost: number;
+};
+
+function describeChangeConcentration(
+  metrics: SundayMetric[],
+  campus: string,
+  filters: ComparisonFilters,
+  priorPeriod: Period | null,
+): ChangeConcentration | null {
+  if (!priorPeriod) return null;
+
+  const anchor = getMajorEventAnchor(metrics, campus, filters.periodA);
+  const splitMonthDay = anchor?.date.slice(5) ?? getMidpointSplitMonthDay(metrics, campus, filters.periodA, filters.metric);
+  if (!splitMonthDay) return null;
+
+  const splitLabel = anchor?.label ?? "the midpoint of the selected period";
+  const currentBefore = getMetricTotalForCampusPeriodSegment(metrics, campus, filters.periodA, filters.metric, (date) =>
+    anchor ? date <= anchor.date : date.slice(5) <= splitMonthDay,
+  );
+  const currentAfter = getMetricTotalForCampusPeriodSegment(metrics, campus, filters.periodA, filters.metric, (date) =>
+    anchor ? date > anchor.date : date.slice(5) > splitMonthDay,
+  );
+  const priorCutoffMonthDay = getComparisonCutoffMonthDay(metrics, filters.periodA, priorPeriod);
+  const priorBefore = getMetricTotalForCampusPeriodSegment(metrics, campus, priorPeriod, filters.metric, (date) =>
+    date.slice(5) <= splitMonthDay,
+    priorCutoffMonthDay,
+  );
+  const priorAfter = getMetricTotalForCampusPeriodSegment(metrics, campus, priorPeriod, filters.metric, (date) =>
+    date.slice(5) > splitMonthDay,
+    priorCutoffMonthDay,
+  );
+
+  if (currentBefore <= 0 || priorBefore <= 0 || currentAfter <= 0 || priorAfter <= 0) {
+    return null;
+  }
+
+  const beforeChange = Math.round(((currentBefore - priorBefore) / priorBefore) * 100);
+  const afterChange = Math.round(((currentAfter - priorAfter) / priorAfter) * 100);
+  const spread = afterChange - beforeChange;
+
+  if (spread <= -8) {
+    return {
+      sentence: anchor
+        ? `The softness is concentrated after ${splitLabel}: before/through that point is ${formatSignedWholePercent(beforeChange)}, while the post-${splitLabel} window is ${formatSignedWholePercent(afterChange)}.`
+        : `The softness is concentrated in the back half of the selected period: the first segment is ${formatSignedWholePercent(beforeChange)}, while the back half is ${formatSignedWholePercent(afterChange)}.`,
+      priorityBoost: Math.abs(spread),
+    };
+  }
+
+  if (spread >= 8) {
+    return {
+      sentence: anchor
+        ? `The trend improved after ${splitLabel}: before/through that point is ${formatSignedWholePercent(beforeChange)}, while the post-${splitLabel} window is ${formatSignedWholePercent(afterChange)}.`
+        : `The trend improved in the back half of the selected period: the first segment is ${formatSignedWholePercent(beforeChange)}, while the back half is ${formatSignedWholePercent(afterChange)}.`,
+      priorityBoost: Math.round(Math.abs(spread) / 2),
+    };
+  }
+
+  return {
+    sentence: anchor
+      ? `The movement is not isolated to ${splitLabel}; before/through that point is ${formatSignedWholePercent(beforeChange)} and the post-${splitLabel} window is ${formatSignedWholePercent(afterChange)}.`
+      : `The movement is fairly even across the selected period: the first segment is ${formatSignedWholePercent(beforeChange)} and the back half is ${formatSignedWholePercent(afterChange)}.`,
+    priorityBoost: 0,
+  };
+}
+
+function getMetricTotalForCampusPeriodSegment(
+  metrics: SundayMetric[],
+  campus: string,
+  period: Period,
+  metric: KpiKey,
+  predicate: (date: string) => boolean,
+  cutoffMonthDay?: string | null,
+) {
+  const field = metricFieldMap[metric];
+  return filterMetricsByPeriod(filterMetricsByField(metrics, field), period, cutoffMonthDay)
+    .filter((record) => record.campus === campus && predicate(record.service_date))
+    .reduce((sum, record) => sum + record[field], 0);
+}
+
+function getMajorEventAnchor(metrics: SundayMetric[], campus: string, period: Period): { date: string; label: string } | null {
+  const eventCandidates = filterMetricsByPeriod(metrics, period)
+    .filter((metric) => metric.campus === campus && metric.notes.trim() !== "")
+    .map((metric) => {
+      const label = getMajorEventLabel(metric.notes);
+      return label ? { date: metric.service_date, label, priority: getMajorEventPriority(label) } : null;
+    })
+    .filter((event): event is { date: string; label: string; priority: number } => event !== null)
+    .sort((left, right) => {
+      if (left.priority !== right.priority) return right.priority - left.priority;
+      return left.date.localeCompare(right.date);
+    });
+
+  if (eventCandidates.length === 0) return null;
+  const event = eventCandidates[0];
+  return { date: event.date, label: event.label };
+}
+
+function getMajorEventLabel(note: string): string | null {
+  const normalized = note.toLowerCase();
+  if (normalized.includes("easter")) return "Easter";
+  if (normalized.includes("good fri") || normalized.includes("good friday")) return "Easter weekend";
+  if (normalized.includes("mother")) return "Mother's Day";
+  if (normalized.includes("father")) return "Father's Day";
+  if (normalized.includes("christmas") || normalized.includes("xmas")) return "Christmas";
+  if (normalized.includes("vision")) return "Vision Sunday";
+  if (normalized.includes("launch")) return "Launch Sunday";
+  if (normalized.includes("baptism")) return "Baptism Sunday";
+  return null;
+}
+
+function getMajorEventPriority(label: string): number {
+  if (label === "Easter") return 7;
+  if (label === "Easter weekend") return 6;
+  if (label === "Christmas") return 5;
+  if (label === "Mother's Day" || label === "Father's Day") return 4;
+  if (label === "Vision Sunday" || label === "Launch Sunday") return 3;
+  return 1;
+}
+
+function getMidpointSplitMonthDay(metrics: SundayMetric[], campus: string, period: Period, metric: KpiKey): string | null {
+  const field = metricFieldMap[metric];
+  const dates = getUniqueSortedDates(
+    filterMetricsByPeriod(filterMetricsByField(metrics, field), period)
+      .filter((metricRecord) => metricRecord.campus === campus && metricRecord[field] > 0),
+  );
+  if (dates.length < 4) return null;
+  return dates[Math.floor((dates.length - 1) / 2)].slice(5);
+}
+
+function formatDirectionalChange(value: number): string {
+  if (value > 0) return `up ${Math.abs(value)}%`;
+  if (value < 0) return `down ${Math.abs(value)}%`;
+  return "flat";
+}
+
+function formatSignedWholePercent(value: number): string {
+  return `${value > 0 ? "+" : ""}${value}%`;
+}
+
+function formatSignedNumber(value: number): string {
+  return `${value > 0 ? "+" : ""}${value}`;
+}
+
+function getOpportunityLens(opportunity: Opportunity): ExecutiveReportLens {
+  switch (opportunity.category) {
+    case "outreach":
+      return "Reach";
+    case "assimilation-leak":
+    case "engagement-gap":
+      return "Connection";
+    case "volunteer-gap":
+    case "kids-strain":
+    case "capacity":
+      return "Capacity";
+    case "seasonal":
+      return "Seasonality";
+    case "replication":
+      return "Replication";
+    case "concentration-risk":
+      return "Leadership Context";
+    default:
+      return "Data Quality";
+  }
 }
 
 function getMetricTotalForCampusesPeriod(
@@ -1341,15 +2059,32 @@ export function buildOpportunities(metrics: SundayMetric[], filters: ComparisonF
   const opps: Opportunity[] = [];
 
   for (const p of profiles) {
+    // 0. CAPACITY WATCH — weekly volunteer coverage is below the operating watch line
+    if (p.attendance > 100 && p.volunteerRatio > 0 && p.volunteerRatio < churchGrowthBenchmarks.weeklyVolunteerCoverageWatch) {
+      const targetVolunteers = Math.round(p.attendance * churchGrowthBenchmarks.weeklyVolunteerCoverageHealthy);
+      const gap = Math.max(targetVolunteers - p.volunteers, 0);
+      opps.push({
+        category: "volunteer-gap",
+        severity: p.attendanceGrowth > 0 ? "high" : "medium",
+        campus: p.campus,
+        title: `${p.campus} has a capacity risk in weekly volunteer coverage`,
+        insight: `${p.campus} is operating at ${formatRatio(p.volunteerRatio)} weekly volunteer coverage. The dashboard watch line is ${formatRatio(churchGrowthBenchmarks.weeklyVolunteerCoverageWatch)} because growth is hard to sustain when Sunday teams do not scale with the room.`,
+        action: gap > 0
+          ? `Add roughly ${gap.toLocaleString()} weekly serving slots or active volunteers before pushing attendance harder. Start with kids, first impressions, parking, and auditorium support.`
+          : "Audit team coverage by service and ministry area before pushing attendance harder.",
+        evidence: `Capacity lens | Volunteers ${p.volunteers.toLocaleString()} | Attendance ${p.attendance.toLocaleString()} | Weekly coverage ${formatRatio(p.volunteerRatio)}.`,
+      });
+    }
+
     // 1. VOLUNTEER PIPELINE GAP — attendance growth significantly outpaces volunteer growth
-    if (p.attendance > 0 && p.attendanceGrowth > 5 && p.volunteerGrowth < p.attendanceGrowth - 8) {
+    if (p.attendance > 0 && p.attendanceGrowth > 5 && p.volunteerGrowth < p.attendanceGrowth - 8 && p.volunteerRatio >= churchGrowthBenchmarks.weeklyVolunteerCoverageWatch) {
       const targetVolunteers = Math.round(p.attendance * Math.max(networkVolunteerRatio, 0.15));
       const gap = Math.max(targetVolunteers - p.volunteers, 0);
       opps.push({
         category: "volunteer-gap",
         severity: "high",
         campus: p.campus,
-        title: `${p.campus} volunteer pipeline isn't keeping pace with growth`,
+        title: `${p.campus} volunteer pipeline is not keeping pace with growth`,
         insight: `Attendance grew ${formatPct(p.attendanceGrowth)} while volunteers grew only ${formatPct(p.volunteerGrowth)}. The ratio is slipping, which usually precedes burnout, dropped responsibilities, and quality decline.`,
         action: gap > 0
           ? `Recruit roughly ${gap.toLocaleString()} additional volunteers in the next 60 days to restore the network-average ratio. Focus on first-impressions, kids, and hospitality teams first — those are visible.`
@@ -1359,15 +2094,17 @@ export function buildOpportunities(metrics: SundayMetric[], filters: ComparisonF
     }
 
     // 2. KIDS MINISTRY STRAIN — attendance growing but kids ratio declining or below benchmark
-    if (p.attendance > 0 && p.attendanceGrowth > 3 && p.kidsGrowth < p.attendanceGrowth - 5) {
+    if (p.attendance > 0 && (p.kidsRatio > churchGrowthBenchmarks.kidsRatioMax * 1.15 || (p.attendanceGrowth > 3 && p.kidsGrowth < p.attendanceGrowth - 5))) {
       opps.push({
         category: "kids-strain",
         severity: "high",
         campus: p.campus,
         title: `${p.campus} kids ministry capacity is tightening`,
-        insight: `Adult attendance grew ${formatPct(p.attendanceGrowth)} but kids attendance grew only ${formatPct(p.kidsGrowth)}. Families may be choosing to skip services or not return when classrooms feel full.`,
+        insight: p.kidsRatio > churchGrowthBenchmarks.kidsRatioMax * 1.15
+          ? `Kids attendance is ${formatRatio(p.kidsRatio)} of weekend attendance, above the 20-25% family-health range. That can be a healthy family signal, but it becomes a capacity risk if classrooms and leaders are not scaling.`
+          : `Adult attendance grew ${formatPct(p.attendanceGrowth)} but kids attendance grew only ${formatPct(p.kidsGrowth)}. Families may be choosing to skip services or not return when classrooms feel full.`,
         action: "Reassess kids classroom capacity, leader-to-child ratios, and check-in flow. A 60-day kids volunteer drive often unlocks the bottleneck before families silently disengage.",
-        evidence: `Kids ratio ${formatRatio(p.kidsRatio)} (network avg ${formatRatio(networkKidsRatio)}). ${p.kids.toLocaleString()} kids vs ${p.attendance.toLocaleString()} adults.`,
+        evidence: `Capacity lens | Kids ratio ${formatRatio(p.kidsRatio)} (healthy range ${formatRatio(churchGrowthBenchmarks.kidsRatioMin)}-${formatRatio(churchGrowthBenchmarks.kidsRatioMax)}). ${p.kids.toLocaleString()} kids vs ${p.attendance.toLocaleString()} attendance.`,
       });
     }
 
@@ -1384,10 +2121,10 @@ export function buildOpportunities(metrics: SundayMetric[], filters: ComparisonF
         category: "assimilation-leak",
         severity: "high",
         campus: p.campus,
-        title: `${p.campus} is converting first-time guests at half the network's rate`,
-        insight: `${p.firstTimeGuests.toLocaleString()} first-time guests this period, but only ${p.growthTrack.toLocaleString()} moved into Growth Track in the same reporting window — a ${(p.growthTrackRate * 100).toFixed(1)}% next-step conversion versus the network's ${(networkGrowthTrackRate * 100).toFixed(1)}%.`,
+        title: `${p.campus} has a weaker guest-to-Growth-Track handoff`,
+        insight: `${p.firstTimeGuests.toLocaleString()} first-time guests were logged this period, and ${p.growthTrack.toLocaleString()} moved into Growth Track in the same reporting window. Because Growth Track volume is below first-time guest volume here, this can be read as a directional next-step conversion signal: ${(p.growthTrackRate * 100).toFixed(1)}% versus the selected scope's ${(networkGrowthTrackRate * 100).toFixed(1)}%.`,
         action: `Audit the guest-to-Growth-Track handoff. Specifically: confirmation timing of follow-up, friction in the signup flow, and whether Growth Track is being introduced from the platform during services. Closing this gap could move ~${Math.max(expectedGrowthTrack - p.growthTrack, 1)} more people into the discipleship pipeline per period.`,
-        evidence: `FTG ${p.firstTimeGuests.toLocaleString()} | Growth Track ${p.growthTrack.toLocaleString()} | Next-step conversion ${(p.growthTrackRate * 100).toFixed(1)}% (network ${(networkGrowthTrackRate * 100).toFixed(1)}%).`,
+        evidence: `Connection lens | FTG ${p.firstTimeGuests.toLocaleString()} | Growth Track ${p.growthTrack.toLocaleString()} | Directional next-step rate ${(p.growthTrackRate * 100).toFixed(1)}% (scope ${(networkGrowthTrackRate * 100).toFixed(1)}%).`,
       });
     }
 
@@ -1398,22 +2135,22 @@ export function buildOpportunities(metrics: SundayMetric[], filters: ComparisonF
         severity: "medium",
         campus: p.campus,
         title: `${p.campus} is growing in seats but not in response`,
-        insight: `Attendance up ${formatPct(p.attendanceGrowth)}, but salvations are down ${formatPct(Math.abs(p.salvationGrowth))}. New people are coming but the message isn't landing, or the call-to-action isn't being made.`,
-        action: "Review the past 4 weekends — are altar-call moments / response cards / next-step prompts being consistently included? Consider a 4-week message series with explicit invitation moments built into the close.",
-        evidence: `Attendance ${formatPct(p.attendanceGrowth)} | Salvations ${formatPct(p.salvationGrowth)}.`,
+        insight: `Attendance is up ${formatPct(p.attendanceGrowth)}, but salvations are down ${Math.abs(p.salvationGrowth).toFixed(1)}%. The reach signal is improving, but the response signal is not keeping pace.`,
+        action: "Review the past 4 weekends for consistency in invitation moments, response cards, prayer team readiness, and next-step prompts. The question is whether the pathway from attendance to response is clear and repeated.",
+        evidence: `Connection lens | Attendance ${formatPct(p.attendanceGrowth)} | Salvations ${formatPct(p.salvationGrowth)}.`,
       });
     }
 
     // 5. OUTREACH OPPORTUNITY — FTG rate well below network
-    if (p.attendance > 100 && p.ftgRate > 0 && p.ftgRate < networkFtgRate * 0.6) {
+    if (p.attendance > 100 && p.ftgRate > 0 && (p.ftgRate < churchGrowthBenchmarks.firstTimeGuestRateMin || p.ftgRate < networkFtgRate * 0.6)) {
       opps.push({
         category: "outreach",
         severity: "medium",
         campus: p.campus,
-        title: `${p.campus} has the lowest invitation culture in the network`,
-        insight: `First-time guests are running at ${(p.ftgRate * 100).toFixed(2)}% of attendance vs the network average ${(networkFtgRate * 100).toFixed(2)}%. Existing attenders aren't bringing friends at the rate other campuses are.`,
+        title: `${p.campus} first-time guest flow is below the reach benchmark`,
+        insight: `First-time guests are running at ${(p.ftgRate * 100).toFixed(2)}% of attendance. The researched health range is ${(churchGrowthBenchmarks.firstTimeGuestRateMin * 100).toFixed(0)}-${(churchGrowthBenchmarks.firstTimeGuestRateMax * 100).toFixed(0)}%, so this is a reach signal to watch before diagnosing motive or culture.`,
         action: "Run an invitation series (4-6 weeks) tied to a hook: pre-Easter, fall launch, holiday weekends. Provide invite cards/digital assets. Track invite-to-visit conversion weekly during the campaign.",
-        evidence: `FTG rate ${(p.ftgRate * 100).toFixed(2)}% vs network ${(networkFtgRate * 100).toFixed(2)}%.`,
+        evidence: `Reach lens | FTG rate ${(p.ftgRate * 100).toFixed(2)}% | Healthy range ${(churchGrowthBenchmarks.firstTimeGuestRateMin * 100).toFixed(0)}-${(churchGrowthBenchmarks.firstTimeGuestRateMax * 100).toFixed(0)}% | Scope avg ${(networkFtgRate * 100).toFixed(2)}%.`,
       });
     }
 
@@ -1428,8 +2165,8 @@ export function buildOpportunities(metrics: SundayMetric[], filters: ComparisonF
           campus: p.campus,
           title: `${p.campus} has the strongest volunteer culture — study it`,
           insight: `Volunteer ratio of ${formatRatio(p.volunteerRatio)} is ${formatPct(((p.volunteerRatio / networkVolunteerRatio) - 1) * 100)} above network. Whatever this campus is doing — recruitment cadence, onboarding, leader development — is working.`,
-          action: "Send a senior leader to shadow this campus's volunteer huddle and onboarding flow. Document their playbook and pilot the most transferable element at one underperforming campus next quarter.",
-          evidence: `Volunteer ratio ${formatRatio(p.volunteerRatio)} (network avg ${formatRatio(networkVolunteerRatio)}).`,
+      action: "Send a senior leader to shadow this campus's volunteer huddle and onboarding flow. Document their playbook and pilot the most transferable element at one underperforming campus next quarter.",
+          evidence: `Replication lens | Volunteer ratio ${formatRatio(p.volunteerRatio)} (scope avg ${formatRatio(networkVolunteerRatio)}).`,
         });
       }
     }
@@ -1443,7 +2180,7 @@ export function buildOpportunities(metrics: SundayMetric[], filters: ComparisonF
         title: `${p.campus} has the bench depth to grow but isn't`,
         insight: `Strong ${formatRatio(p.volunteerRatio)} volunteer ratio (above network) means hospitality, kids, and serve teams are well-staffed. Yet attendance has been flat (${formatPct(p.attendanceGrowth)}). The capacity to receive growth exists — the magnet for it doesn't.`,
         action: "Pair this campus with an outreach push: community-facing event, neighborhood serve project, or a 'bring one' weekend campaign. The infrastructure can absorb the growth without strain.",
-        evidence: `Volunteer ratio ${formatRatio(p.volunteerRatio)}, attendance trend ${formatPct(p.attendanceGrowth)}.`,
+        evidence: `Reach + Capacity lens | Volunteer ratio ${formatRatio(p.volunteerRatio)}, attendance trend ${formatPct(p.attendanceGrowth)}.`,
       });
     }
   }
@@ -1458,9 +2195,9 @@ export function buildOpportunities(metrics: SundayMetric[], filters: ComparisonF
         severity: "medium",
         campus: topCampus.campus,
         title: `${topCampus.campus} carries ${formatPct(concentration * 100)} of total network attendance`,
-        insight: `If ${topCampus.campus} has a hard week (snow, leadership transition, building issue), it materially moves the entire ministry's numbers. Smaller campuses aren't yet diversifying the base enough to absorb that variance.`,
+        insight: `If ${topCampus.campus} has a hard week (weather, leadership transition, building issue), it materially moves the entire ministry's numbers. This is a portfolio concentration issue, not a criticism of smaller campuses.`,
         action: "Set explicit growth targets at the 2-3 next-largest campuses to bring the network's share-of-total under 35%. Resource them disproportionately — campus pastor support, marketing budget, or shared leadership investment.",
-        evidence: `${topCampus.campus}: ${topCampus.attendance.toLocaleString()} of ${networkTotalAttendance.toLocaleString()} total (${formatPct(concentration * 100)}).`,
+        evidence: `Leadership context lens | ${topCampus.campus}: ${topCampus.attendance.toLocaleString()} of ${networkTotalAttendance.toLocaleString()} total (${formatPct(concentration * 100)}).`,
       });
     }
   }
@@ -1478,7 +2215,7 @@ export function buildOpportunities(metrics: SundayMetric[], filters: ComparisonF
         title: `Recurring soft months: ${lowMonths.map((m) => m.label).join(", ")}`,
         insight: `Across the network, ${lowMonths.map((m) => m.label).join(" and ")} consistently come in below the year's average attendance. These dips look seasonal — vacation cycles, school transitions, cultural rhythms — not crisis-driven.`,
         action: "Plan ahead: a sermon series with high cliffhanger continuity, a community-facing initiative, or a guest speaker rotation during these months. The goal is not to avoid the dip but to soften it from the average.",
-        evidence: lowMonths.map((m) => `${m.label}: ${m.value.toLocaleString()}`).join(", "),
+        evidence: `Seasonality lens | ${lowMonths.map((m) => `${m.label}: ${m.value.toLocaleString()}`).join(", ")}`,
       });
     }
   }
@@ -1607,7 +2344,7 @@ function buildFallbackOpportunities(profiles: CampusProfile[], filters: Comparis
       title: `${lowestVolunteerCoverage.campus} has the thinnest volunteer coverage in the selected group`,
       insight: `${lowestVolunteerCoverage.campus} is currently operating with a ${formatRatio(lowestVolunteerCoverage.volunteerRatio)} volunteer ratio, the lowest among the campuses in this export scope. That usually means the margin for growth or execution issues is tighter.`,
       action: `Pressure-test team coverage by service at ${lowestVolunteerCoverage.campus}. If there are friction points in kids, hospitality, or parking, prioritize recruiting there before pushing harder on attendance growth.`,
-      evidence: `Volunteer ratio ${formatRatio(lowestVolunteerCoverage.volunteerRatio)} | Attendance ${lowestVolunteerCoverage.attendance.toLocaleString()} | Volunteers ${lowestVolunteerCoverage.volunteers.toLocaleString()}.`,
+      evidence: `Capacity lens | Weekly volunteer coverage ${formatRatio(lowestVolunteerCoverage.volunteerRatio)} | Attendance ${lowestVolunteerCoverage.attendance.toLocaleString()} | Volunteers ${lowestVolunteerCoverage.volunteers.toLocaleString()}.`,
     });
   }
 
@@ -1619,7 +2356,7 @@ function buildFallbackOpportunities(profiles: CampusProfile[], filters: Comparis
       title: `${weakestAssimilation.campus} is the first follow-up workflow to audit`,
       insight: `${weakestAssimilation.campus} has the weakest guest-to-Growth-Track next-step rate in the selected scope. Even if the broader data does not trigger a hard alert, this is the clearest place to tighten the assimilation path.`,
       action: `Trace the guest handoff from Sunday to next-step invitation at ${weakestAssimilation.campus}. Focus on response timing, clear invitations from the platform, and reducing signup friction.`,
-      evidence: `FTG ${weakestAssimilation.firstTimeGuests.toLocaleString()} | Growth Track ${weakestAssimilation.growthTrack.toLocaleString()} | Next-step rate ${(weakestAssimilation.growthTrackRate * 100).toFixed(1)}%.`,
+      evidence: `Connection lens | FTG ${weakestAssimilation.firstTimeGuests.toLocaleString()} | Growth Track ${weakestAssimilation.growthTrack.toLocaleString()} | Directional next-step rate ${(weakestAssimilation.growthTrackRate * 100).toFixed(1)}%.`,
     });
   }
 
@@ -1631,7 +2368,7 @@ function buildFallbackOpportunities(profiles: CampusProfile[], filters: Comparis
       title: `${strongestMomentumCampus.campus} is outperforming its own prior attendance baseline`,
       insight: `${strongestMomentumCampus.campus} is up ${formatPct(strongestMomentumCampus.attendanceGrowth)} in ${periodLabel} versus its own comparable prior period. This is a campus-specific momentum signal, not a raw size comparison against the other locations in scope.`,
       action: `Document what changed at ${strongestMomentumCampus.campus} between periods — promotion rhythm, volunteer readiness, and guest follow-up — and decide which of those practices can transfer to the other campuses in this view.`,
-      evidence: `Attendance ${strongestMomentumCampus.attendance.toLocaleString()} | Trend ${formatPct(strongestMomentumCampus.attendanceGrowth)} vs its prior baseline.`,
+      evidence: `Reach lens | Attendance ${strongestMomentumCampus.attendance.toLocaleString()} | Trend ${formatPct(strongestMomentumCampus.attendanceGrowth)} vs its prior baseline.`,
     });
   }
 
@@ -1643,7 +2380,7 @@ function buildFallbackOpportunities(profiles: CampusProfile[], filters: Comparis
       title: `${weakestMomentumCampus.campus} is below its own prior attendance baseline`,
       insight: `${weakestMomentumCampus.campus} is down ${formatPct(weakestMomentumCampus.attendanceGrowth)} in ${periodLabel} versus its own comparable prior period. The concern here is the campus's own softening trend, not that it is smaller than another campus in the selected view.`,
       action: `Review the last 4-8 weeks at ${weakestMomentumCampus.campus} for service consistency, guest experience friction, and missed follow-up opportunities before the next board packet.`,
-      evidence: `Attendance ${weakestMomentumCampus.attendance.toLocaleString()} | Trend ${formatPct(weakestMomentumCampus.attendanceGrowth)} vs its prior baseline.`,
+      evidence: `Reach lens | Attendance ${weakestMomentumCampus.attendance.toLocaleString()} | Trend ${formatPct(weakestMomentumCampus.attendanceGrowth)} vs its prior baseline.`,
     });
   }
 
@@ -1672,20 +2409,24 @@ function buildSingleCampusFallbackOpportunities(profile: CampusProfile, filters:
       profile.attendanceGrowth >= 0
         ? `Document what changed at ${profile.campus} between ${priorLabel} and ${periodLabel} — promotion rhythm, volunteer deployment, service flow, and guest follow-up — so that growth drivers are preserved and repeatable.`
         : `Review the attendance trend at ${profile.campus} against ${priorLabel}. Start with schedule consistency, special-event displacement, volunteer coverage, and guest retention from the last 4-8 weeks.`,
-    evidence: `Attendance ${profile.attendance.toLocaleString()} | Trend ${formatPct(profile.attendanceGrowth)} vs ${priorLabel}.`,
+    evidence: `Reach lens | Attendance ${profile.attendance.toLocaleString()} | Trend ${formatPct(profile.attendanceGrowth)} vs ${priorLabel}.`,
   });
 
   results.push({
     category: "volunteer-gap",
-    severity: profile.volunteerRatio < 0.12 ? "high" : profile.volunteerRatio < 0.16 ? "medium" : "low",
+    severity: profile.volunteerRatio < churchGrowthBenchmarks.weeklyVolunteerCoverageWatch
+      ? "high"
+      : profile.volunteerRatio < churchGrowthBenchmarks.weeklyVolunteerCoverageHealthy
+        ? "medium"
+        : "low",
     campus: profile.campus,
     title: `${profile.campus} volunteer coverage should be watched against current attendance`,
     insight: `${profile.campus} is serving ${profile.attendance.toLocaleString()} attenders with ${profile.volunteers.toLocaleString()} volunteers, a ${formatRatio(profile.volunteerRatio)} coverage ratio. For a single-campus report, this is best read as capacity relative to the campus's own current load rather than compared to other locations.`,
     action:
-      profile.volunteerRatio < 0.16
+      profile.volunteerRatio < churchGrowthBenchmarks.weeklyVolunteerCoverageHealthy
         ? `Pressure-test coverage by team and service at ${profile.campus}. If check-in, hospitality, parking, or kids are thin, recruit there before pushing harder on growth.`
         : `Keep tracking volunteer coverage at ${profile.campus} as attendance changes. Healthy momentum is easier to sustain when the serve pipeline grows alongside the room.`,
-    evidence: `Volunteers ${profile.volunteers.toLocaleString()} | Attendance ${profile.attendance.toLocaleString()} | Ratio ${formatRatio(profile.volunteerRatio)}.`,
+    evidence: `Capacity lens | Volunteers ${profile.volunteers.toLocaleString()} | Attendance ${profile.attendance.toLocaleString()} | Weekly coverage ${formatRatio(profile.volunteerRatio)}.`,
   });
 
   if (profile.firstTimeGuests > 0) {
@@ -1701,7 +2442,7 @@ function buildSingleCampusFallbackOpportunities(profile: CampusProfile, filters:
               profile.growthTrackRate < 0.2
                 ? `Audit the guest handoff at ${profile.campus}: platform invitation, follow-up timing, signup friction, and whether the next step is clear enough on the same day.`
                 : `Maintain the current guest follow-up path at ${profile.campus} and keep watching whether next-step conversion holds as guest volume changes.`,
-            evidence: `FTG ${profile.firstTimeGuests.toLocaleString()} | Growth Track ${profile.growthTrack.toLocaleString()} | Next-step rate ${(profile.growthTrackRate * 100).toFixed(1)}%.`,
+            evidence: `Connection lens | FTG ${profile.firstTimeGuests.toLocaleString()} | Growth Track ${profile.growthTrack.toLocaleString()} | Directional next-step rate ${(profile.growthTrackRate * 100).toFixed(1)}%.`,
           }
         : {
             category: "assimilation-leak",
@@ -1710,7 +2451,7 @@ function buildSingleCampusFallbackOpportunities(profile: CampusProfile, filters:
             title: `${profile.campus} Growth Track volume should be read as next-step activity, not direct guest conversion`,
             insight: `${profile.campus} logged ${profile.firstTimeGuests.toLocaleString()} first-time guests and ${profile.growthTrack.toLocaleString()} Growth Track movements in ${periodLabel}. Because Growth Track exceeds guest volume, these counts are not cohort-matched and should not be interpreted as a literal conversion percentage.`,
             action: `Use this as a directional next-step activity signal only. If leadership wants true guest conversion analysis, the data model needs a cohort-based guest-to-next-step linkage instead of period totals alone.`,
-            evidence: `FTG ${profile.firstTimeGuests.toLocaleString()} | Growth Track ${profile.growthTrack.toLocaleString()} | Cohort-compatible: no.`,
+            evidence: `Data quality lens | FTG ${profile.firstTimeGuests.toLocaleString()} | Growth Track ${profile.growthTrack.toLocaleString()} | Cohort-compatible: no.`,
           },
     );
   }
@@ -1729,7 +2470,7 @@ function buildSingleCampusFallbackOpportunities(profile: CampusProfile, filters:
         profile.salvationGrowth < 0
           ? `Review the past several weekends at ${profile.campus} for consistency in invitation moments, follow-up pathways, and service close clarity.`
           : `Capture the response environment at ${profile.campus} — message flow, invitation moments, and counselor readiness — so the team knows what to preserve.`,
-      evidence: `Salvations ${profile.salvations.toLocaleString()} | Trend ${formatPct(profile.salvationGrowth)} vs ${priorLabel}.`,
+      evidence: `Connection lens | Salvations ${profile.salvations.toLocaleString()} | Trend ${formatPct(profile.salvationGrowth)} vs ${priorLabel}.`,
     });
   }
 
@@ -1870,9 +2611,10 @@ export function getCampusPulse(metrics: SundayMetric[], metric: KpiKey = "attend
 
   return campuses
     .map((campus) => {
+      const campusSeries = buildCampusMetricDateSeries(metricRecords.filter((m) => m.campus === campus), field);
+      const valueByDate = new Map(campusSeries.map((point) => [point.service_date, point.value]));
       const sparkline = recentDates.map((date) => {
-        const record = metricRecords.find((m) => m.campus === campus && m.service_date === date);
-        return { date, value: (record?.[field] as number | undefined) ?? 0 };
+        return { date, value: valueByDate.get(date) ?? 0 };
       });
 
       const nonZero = sparkline.filter((p) => p.value > 0);
@@ -2126,6 +2868,7 @@ export function buildComparisonBrief(data: ComparisonDatasetPoint[], filters: Co
   const campuses = filters.selectedCampuses.filter(Boolean);
   const scorecard = metrics.length > 0 ? buildExecutiveScorecard(metrics, filters, campuses) : null;
   const executiveBrief = metrics.length > 0 ? buildExecutiveBrief(metrics, filters, campuses) : null;
+  const actionCards = metrics.length > 0 ? buildExecutiveActionCards(metrics, filters, campuses) : [];
   const findings = metrics.length > 0 ? buildExecutiveFindings(metrics, filters, campuses) : [];
 
   return [
@@ -2134,6 +2877,9 @@ export function buildComparisonBrief(data: ComparisonDatasetPoint[], filters: Co
     `Selected campuses: ${filters.selectedCampuses.join(", ")}`,
     `Metric: ${getMetricLabel(filters.metric)}`,
     `Timeframe: ${periodLabel}`,
+    `Framework: Reach, Connection, and Capacity.`,
+    `Benchmarks used: 20% YoY attendance growth target; first-time guests at 2-4% of attendance; kids at 20-25% of attendance; weekly volunteer coverage watch line at 14% and healthy line at 16%.`,
+    `Data note: the 40% volunteer-roster target, 75% Growth Track completion, and 80% Growth Track-to-serving goals require roster/cohort data before direct scoring.`,
     ``,
     ...(scorecard
       ? [
@@ -2165,10 +2911,25 @@ export function buildComparisonBrief(data: ComparisonDatasetPoint[], filters: Co
           ``,
         ]
       : []),
+    ...(actionCards.length > 0
+      ? [
+          `Executive operating agenda:`,
+          ...actionCards.flatMap((card, index) => [
+            `${index + 1}. [${card.urgency} · ${card.lens}] ${card.title}`,
+            `Diagnosis: ${card.diagnosis}`,
+            `Working theory: ${card.hypothesis}`,
+            `Decision: ${card.decision}`,
+            `Next move: ${card.nextMove}`,
+            `Evidence: ${card.evidence.join(" | ")}`,
+            `Data to confirm: ${card.dataToConfirm.join(" | ")}`,
+          ]),
+          ``,
+        ]
+      : []),
     ...(findings.length > 0
       ? [
           `Priority findings:`,
-          ...findings.map((finding, index) => `${index + 1}. ${finding.title} — ${finding.detail}`),
+          ...findings.map((finding, index) => `${index + 1}. [${finding.lens}] ${finding.title} — ${finding.detail}`),
           ``,
         ]
       : []),
@@ -2204,6 +2965,7 @@ export function buildComparisonHtml(data: ComparisonDatasetPoint[], filters: Com
   const generatedDate = new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   const scorecard = metrics.length > 0 ? buildExecutiveScorecard(metrics, filters, campuses) : null;
   const executiveBrief = metrics.length > 0 ? buildExecutiveBrief(metrics, filters, campuses) : null;
+  const actionCards = metrics.length > 0 ? buildExecutiveActionCards(metrics, filters, campuses) : [];
   const executiveFindings = metrics.length > 0 ? buildExecutiveFindings(metrics, filters, campuses) : [];
 
   // Aggregate per-campus totals for each period
@@ -2415,6 +3177,20 @@ export function buildComparisonHtml(data: ComparisonDatasetPoint[], filters: Com
       .finding-positive { background: #dcfce7; color: #166534; }
       .finding-warning { background: #fee2e2; color: #991b1b; }
       .finding-neutral { background: #e2e8f0; color: #334155; }
+      .agenda-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
+      .agenda-card { border: 1px solid #e2e8f0; border-radius: 16px; background: #fbfbfc; padding: 18px 20px; border-left: 4px solid #0f172a; }
+      .agenda-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+      .agenda-title { font-size: 15px; font-weight: 700; color: #0f172a; line-height: 1.35; }
+      .agenda-pill { font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.12em; border-radius: 999px; padding: 4px 9px; white-space: nowrap; }
+      .agenda-now { background: #fee2e2; color: #991b1b; }
+      .agenda-week { background: #fef3c7; color: #92400e; }
+      .agenda-monitor { background: #e2e8f0; color: #334155; }
+      .agenda-label { margin-top: 12px; font-size: 10px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: #64748b; }
+      .agenda-body { margin-top: 4px; font-size: 13px; color: #334155; line-height: 1.6; }
+      .agenda-evidence { margin-top: 10px; display: grid; gap: 6px; }
+      .agenda-evidence p { background: #ffffff; border-radius: 10px; padding: 7px 9px; font-size: 11px; color: #64748b; }
+      .agenda-data { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+      .agenda-data span { background: #ffffff; border: 1px dashed #cbd5e1; border-radius: 999px; padding: 4px 8px; font-size: 10px; color: #475569; font-weight: 600; }
       .chart-card { border: 1px solid #e2e8f0; border-radius: 14px; padding: 18px; background: #ffffff; margin-top: 12px; }
       .chart-grid { display: grid; grid-template-columns: 1.5fr 1fr; gap: 16px; margin-top: 12px; align-items: start; }
       .chart-grid .chart-card { margin-top: 0; }
@@ -2425,7 +3201,7 @@ export function buildComparisonHtml(data: ComparisonDatasetPoint[], filters: Com
       .donut-legend .swatch { display: inline-flex; align-items: center; gap: 6px; }
       .donut-legend .swatch-color { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
       @page { margin: 0.5in; }
-      @media print { body { padding: 24px; } .takeaway { background: #f1f5f9; color: #0f172a; } .takeaway h2, .takeaway p, .takeaway strong { color: #0f172a; } .chart-grid { grid-template-columns: 1fr; } .opp-grid { grid-template-columns: 1fr; } }
+      @media print { body { padding: 24px; } .takeaway { background: #f1f5f9; color: #0f172a; } .takeaway h2, .takeaway p, .takeaway strong { color: #0f172a; } .chart-grid { grid-template-columns: 1fr; } .opp-grid { grid-template-columns: 1fr; } .agenda-grid { grid-template-columns: 1fr; } }
     </style>
   </head>
   <body>
@@ -2439,6 +3215,8 @@ export function buildComparisonHtml(data: ComparisonDatasetPoint[], filters: Com
       </div>
     </div>
 
+    ${renderResearchFoundationSection()}
+
     ${scorecard ? renderScorecardSection(scorecard) : ""}
 
     ${executiveBrief ? `
@@ -2448,6 +3226,8 @@ export function buildComparisonHtml(data: ComparisonDatasetPoint[], filters: Com
       <p class="brief-body">${escapeHtml(executiveBrief.summary)}</p>
     </div>` : ""}
 
+    ${actionCards.length > 0 ? renderExecutiveActionCardsSection(actionCards) : ""}
+
     ${executiveFindings.length > 0 ? `
     <h2>Priority findings</h2>
     <div class="findings-list">
@@ -2455,7 +3235,7 @@ export function buildComparisonHtml(data: ComparisonDatasetPoint[], filters: Com
         <div class="finding-card">
           <p class="finding-title">${escapeHtml(finding.title)}</p>
           <p class="finding-body">${escapeHtml(finding.detail)}</p>
-          <span class="finding-tag finding-${finding.tone}">${finding.tone === "positive" ? "Replicate" : finding.tone === "warning" ? "Action" : "Watch"}</span>
+          <span class="finding-tag finding-${finding.tone}">${escapeHtml(finding.lens)}</span>
         </div>
       `).join("")}
     </div>` : ""}
@@ -2688,6 +3468,68 @@ function renderScorecardSection(scorecard: ExecutiveScorecard): string {
         `).join("")}
       </div>
     ` : ""}
+  `;
+}
+
+function renderResearchFoundationSection(): string {
+  return `
+    <h2>Research-backed reporting framework</h2>
+    <div class="findings-list">
+      <div class="finding-card">
+        <p class="finding-title">Reach</p>
+        <p class="finding-body">Attendance momentum, first-time guest flow, event lift, and year-over-year growth speed. The internal growth target is 20% YoY, and first-time guests are evaluated against a 2-4% of attendance health range.</p>
+      </div>
+      <div class="finding-card">
+        <p class="finding-title">Connection</p>
+        <p class="finding-body">Salvations, Growth Track movement, baptism, groups, and whether people are moving from attendance into identifiable next steps. Growth Track is treated as directional activity unless guest cohorts and completion data are available.</p>
+      </div>
+      <div class="finding-card">
+        <p class="finding-title">Capacity</p>
+        <p class="finding-body">Volunteer coverage, kids ministry load, service-time pressure, and staff-transition context. Weekly volunteer counts are a useful pressure signal, while the 40% volunteer-roster target requires roster-level Planning Center data.</p>
+      </div>
+    </div>
+  `;
+}
+
+function renderExecutiveActionCardsSection(cards: ExecutiveActionCard[]): string {
+  const urgencyClass: Record<ExecutiveActionCard["urgency"], string> = {
+    "Decide now": "agenda-now",
+    "This week": "agenda-week",
+    Monitor: "agenda-monitor",
+  };
+
+  return `
+    <h2>Executive operating agenda</h2>
+    <p style="font-size: 13px;">Decision-ready cards built from the selected campuses, aligned comparison window, health ratios, event context, and pathway signals.</p>
+    <div class="agenda-grid">
+      ${cards.map((card) => `
+        <div class="agenda-card">
+          <div class="agenda-head">
+            <div>
+              <p class="agenda-title">${escapeHtml(card.title)}</p>
+              <p class="agenda-label" style="margin-top: 6px;">${escapeHtml(card.lens)}</p>
+            </div>
+            <span class="agenda-pill ${urgencyClass[card.urgency]}">${escapeHtml(card.urgency)}</span>
+          </div>
+          <p class="agenda-label">Diagnosis</p>
+          <p class="agenda-body">${escapeHtml(card.diagnosis)}</p>
+          <p class="agenda-label">Working theory</p>
+          <p class="agenda-body">${escapeHtml(card.hypothesis)}</p>
+          <p class="agenda-label">Decision</p>
+          <p class="agenda-body">${escapeHtml(card.decision)}</p>
+          <p class="agenda-label">Next move</p>
+          <p class="agenda-body">${escapeHtml(card.nextMove)}</p>
+          <p class="agenda-label">Evidence</p>
+          <div class="agenda-evidence">
+            ${card.evidence.slice(0, 4).map((item) => `<p>${escapeHtml(item)}</p>`).join("")}
+          </div>
+          <p class="agenda-label">Data to confirm</p>
+          <div class="agenda-data">
+            ${card.dataToConfirm.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
+          </div>
+        </div>
+      `).join("")}
+    </div>
   `;
 }
 
