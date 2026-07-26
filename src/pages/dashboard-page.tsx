@@ -174,10 +174,11 @@ export function DashboardPage() {
             onExportSummary={exportComparisonSummary}
             onExportPdfReady={exportComparisonPdfReady}
           />
+          <InsightsPanel insights={insights} events={events} variant="wide" />
           <CampusPulseCard metrics={metrics} />
         </div>
 
-        <InsightsPanel insights={insights} events={events} />
+        <InsightsPanel insights={insights} events={events} variant="rail" />
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(340px,0.85fr)]">

@@ -4,12 +4,40 @@ import { churchGrowthBenchmarks, type DashboardInsights, type EventNote } from "
 type InsightsPanelProps = {
   insights: DashboardInsights;
   events: EventNote[];
+  variant?: "full" | "rail" | "wide";
 };
 
-export function InsightsPanel({ insights, events }: InsightsPanelProps) {
+export function InsightsPanel({ insights, events, variant = "full" }: InsightsPanelProps) {
   const { scorecard, executiveBrief, actionCards, findings, trendAlerts, anomalies, health, latestDate, metricLabel, scopedCampuses } = insights;
   const hasAnyData =
     !!scorecard || !!executiveBrief || actionCards.length > 0 || findings.length > 0 || trendAlerts.length > 0 || anomalies.length > 0 || health.length > 0 || events.length > 0;
+
+  if (variant === "wide") {
+    return (
+      <div className="space-y-6">
+        <OperatingAgendaCard cards={actionCards} layout="grid" />
+        <PriorityFindingsCard findings={findings} />
+      </div>
+    );
+  }
+
+  if (variant === "rail") {
+    return (
+      <div className="space-y-6">
+        <ExecutiveBriefCard brief={executiveBrief} metricLabel={metricLabel} scopedCampuses={scopedCampuses} />
+        <GrowthScorecardCard scorecard={scorecard} />
+        <TrendWatchCard alerts={trendAlerts} />
+        <AnomalyCard anomalies={anomalies} events={events} />
+        <EventsCard events={events} />
+        <HealthRatiosCard health={health} latestDate={latestDate} />
+        {!hasAnyData && (
+          <div className="rounded-[30px] border border-gray-200 bg-white p-6 text-sm text-gray-500">
+            Not enough data yet to surface insights. Import more weekly records to start seeing trend alerts and anomalies.
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -30,7 +58,7 @@ export function InsightsPanel({ insights, events }: InsightsPanelProps) {
   );
 }
 
-function OperatingAgendaCard({ cards }: { cards: DashboardInsights["actionCards"] }) {
+function OperatingAgendaCard({ cards, layout = "stacked" }: { cards: DashboardInsights["actionCards"]; layout?: "stacked" | "grid" }) {
   if (cards.length === 0) return null;
 
   return (
@@ -46,7 +74,7 @@ function OperatingAgendaCard({ cards }: { cards: DashboardInsights["actionCards"
         </div>
       </div>
 
-      <div className="mt-4 space-y-4">
+      <div className={layout === "grid" ? "mt-4 grid gap-4 xl:grid-cols-2" : "mt-4 space-y-4"}>
         {cards.map((card) => (
           <div key={`${card.campus}-${card.lens}-${card.title}`} className="rounded-2xl border border-gray-200 bg-[#fbfbfc] p-4">
             <div className="flex items-start justify-between gap-3">
