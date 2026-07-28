@@ -9,8 +9,9 @@ export default {
         ink: "#111827",
         line: "#e5e7eb",
         accent: {
-          DEFAULT: "#0f766e",
-          soft: "#ccfbf1",
+          DEFAULT: "#ea580c",
+          soft: "#ffedd5",
+          ring: "#fed7aa",
         },
       },
       boxShadow: {

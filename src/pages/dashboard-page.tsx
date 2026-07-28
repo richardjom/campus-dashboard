@@ -144,7 +144,7 @@ export function DashboardPage() {
             </Link>
             <Link
               to="/insights"
-              className="inline-flex h-12 items-center gap-2 rounded-2xl bg-[#2563eb] px-5 text-sm font-semibold text-white transition hover:bg-[#1d4ed8]"
+              className="inline-flex h-12 items-center gap-2 rounded-2xl bg-slate-950 px-5 text-sm font-semibold text-white transition hover:bg-slate-800"
             >
               <FileText className="h-4 w-4" />
               Open reports
