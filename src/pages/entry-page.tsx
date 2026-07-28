@@ -381,7 +381,7 @@ export function EntryPage() {
             <div className="flex flex-wrap gap-3">
               <button
                 onClick={submitManualEntry}
-                className="inline-flex h-12 items-center gap-2 rounded-2xl bg-[#2563eb] px-5 text-sm font-semibold text-white transition hover:bg-[#1d4ed8]"
+                className="inline-flex h-12 items-center gap-2 rounded-2xl bg-slate-950 px-5 text-sm font-semibold text-white transition hover:bg-slate-800"
               >
                 <Send className="h-4 w-4" />
                 Save Sunday entry
@@ -399,7 +399,7 @@ export function EntryPage() {
           <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
             <section className="rounded-[28px] border border-gray-200 bg-[#fbfbfc] p-6">
               <div className="flex items-center gap-3">
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#eff6ff] text-[#2563eb]">
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-accent-soft text-accent">
                   <FileUp className="h-4 w-4" />
                 </div>
                 <div>
@@ -425,7 +425,7 @@ export function EntryPage() {
               <div className="mt-6 flex flex-wrap gap-3">
                 <button
                   onClick={openPicker}
-                  className="inline-flex h-12 items-center gap-2 rounded-2xl bg-[#2563eb] px-5 text-sm font-semibold text-white transition hover:bg-[#1d4ed8]"
+                  className="inline-flex h-12 items-center gap-2 rounded-2xl bg-slate-950 px-5 text-sm font-semibold text-white transition hover:bg-slate-800"
                 >
                   <Upload className="h-4 w-4" />
                   Upload Sunday CSV
@@ -530,7 +530,7 @@ export function EntryPage() {
                 type="checkbox"
                 checked={anomalyNoService}
                 onChange={(event) => setAnomalyNoService(event.target.checked)}
-                className="h-4 w-4 rounded border-gray-300 text-[#2563eb]"
+                className="h-4 w-4 rounded border-gray-300 text-accent"
               />
               No Sunday service held
             </label>

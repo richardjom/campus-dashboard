@@ -98,7 +98,7 @@ export function RecordsPage() {
           <div className="flex flex-wrap gap-3">
             <button
               onClick={openPicker}
-              className="inline-flex h-12 items-center gap-2 rounded-2xl bg-[#2563eb] px-5 text-sm font-semibold text-white transition hover:bg-[#1d4ed8]"
+              className="inline-flex h-12 items-center gap-2 rounded-2xl bg-slate-950 px-5 text-sm font-semibold text-white transition hover:bg-slate-800"
             >
               <Upload className="h-4 w-4" />
               Upload CSV
@@ -145,7 +145,7 @@ export function RecordsPage() {
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
         <section className="rounded-[30px] border border-gray-200 bg-white p-6 lg:p-7">
           <div className="flex items-center gap-3 border-b border-gray-200 pb-5">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#eff6ff] text-[#2563eb]">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-accent-soft text-accent">
               <FileUp className="h-4 w-4" />
             </div>
             <div>

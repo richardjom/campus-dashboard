@@ -174,7 +174,7 @@ export function SettingsPage() {
       {/* Planning Center connection */}
       <section className="rounded-[30px] border border-gray-200 bg-white p-6 lg:p-7">
         <div className="flex items-start gap-4 border-b border-gray-200 pb-6">
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#eff6ff] text-[#2563eb]">
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-accent-soft text-accent">
             <Link2 className="h-4 w-4" />
           </div>
           <div>
@@ -344,7 +344,7 @@ export function SettingsPage() {
                   <button
                     onClick={handleSaveAndImport}
                     disabled={!credentials.appId || !credentials.secret || connectionStatus === "testing" || importStatus === "importing"}
-                    className="inline-flex h-10 items-center gap-2 rounded-2xl bg-[#2563eb] px-4 text-sm font-semibold text-white transition hover:bg-[#1d4ed8] disabled:opacity-50"
+                    className="inline-flex h-10 items-center gap-2 rounded-2xl bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50"
                   >
                     {importStatus === "importing" ? <Loader className="h-4 w-4 animate-spin" /> : <Users className="h-4 w-4" />}
                     {importStatus === "importing" ? "Importing…" : "Connect & import people"}

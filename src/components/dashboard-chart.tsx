@@ -10,7 +10,7 @@ import {
 } from "../lib/sunday-metrics";
 import { ChevronDown, Download, GitCompareArrows, Plus, X } from "lucide-react";
 
-const lineColors = ["#2563eb", "#0f172a", "#14b8a6", "#f97316", "#7c3aed", "#dc2626", "#0891b2", "#84cc16", "#ec4899", "#6366f1"];
+const lineColors = ["#ea580c", "#0f172a", "#2563eb", "#eab308", "#14b8a6", "#dc2626", "#7c3aed", "#0891b2", "#84cc16", "#ec4899"];
 
 const quarterOptions = [
   { value: 0, label: "Full Year" },

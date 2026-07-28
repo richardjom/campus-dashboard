@@ -5,9 +5,9 @@ import { metricOptions, type KpiKey } from "../lib/mock-data";
 import { getDistribution, type DistributionPeriodMode, type SundayMetric } from "../lib/sunday-metrics";
 
 const palette = [
-  "#2563eb", "#0f172a", "#14b8a6", "#f97316",
-  "#7c3aed", "#dc2626", "#0891b2", "#84cc16",
-  "#ec4899", "#6366f1",
+  "#ea580c", "#0f172a", "#2563eb", "#eab308",
+  "#14b8a6", "#dc2626", "#7c3aed", "#0891b2",
+  "#84cc16", "#ec4899",
 ];
 
 const periodModes: Array<{ value: DistributionPeriodMode; label: string; description: string }> = [

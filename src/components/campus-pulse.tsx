@@ -87,7 +87,7 @@ function PulseTile({ campus }: { campus: CampusPulse }) {
             <Line
               type="monotone"
               dataKey="value"
-              stroke={isUp ? "#0f766e" : "#dc2626"}
+              stroke={isUp ? "#ea580c" : "#dc2626"}
               strokeWidth={2}
               dot={false}
             />

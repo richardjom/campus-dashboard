@@ -36,7 +36,7 @@ export function ConversionFunnelCard({
     return (
       <section className="rounded-[30px] border border-gray-200 bg-white p-6 lg:p-7">
         <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#eff6ff] text-[#2563eb]">
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-accent-soft text-accent">
             <ArrowRight className="h-4 w-4" />
           </div>
           <div>

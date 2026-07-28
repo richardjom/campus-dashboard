@@ -178,7 +178,7 @@ export function PeoplePage() {
             </Link>
             <Link
               to="/pipeline"
-              className="inline-flex h-12 items-center gap-2 rounded-2xl bg-[#2563eb] px-5 text-sm font-semibold text-white transition hover:bg-[#1d4ed8]"
+              className="inline-flex h-12 items-center gap-2 rounded-2xl bg-slate-950 px-5 text-sm font-semibold text-white transition hover:bg-slate-800"
             >
               <UserPlus className="h-4 w-4" />
               Guest pipeline
@@ -244,7 +244,7 @@ export function PeoplePage() {
           {activeStage !== "all" && (
             <button
               onClick={() => setActiveStage("all")}
-              className="text-sm font-semibold text-[#2563eb] hover:underline"
+              className="text-sm font-semibold text-accent hover:underline"
             >
               Clear filter
             </button>

@@ -148,7 +148,7 @@ export function InsightsPage() {
               <select
                 value={selectedScope}
                 onChange={(event) => setSelectedScope(event.target.value)}
-                className="h-12 rounded-2xl border border-gray-200 bg-white px-4 text-sm font-medium text-slate-900 outline-none transition focus:border-[#2563eb]"
+                className="h-12 rounded-2xl border border-gray-200 bg-white px-4 text-sm font-medium text-slate-900 outline-none transition focus:border-slate-900"
               >
                 <option value="all">Network portfolio</option>
                 {availableCampuses.map((campus) => (
@@ -164,7 +164,7 @@ export function InsightsPage() {
               <select
                 value={selectedYear}
                 onChange={(event) => setSelectedYear(event.target.value)}
-                className="h-12 rounded-2xl border border-gray-200 bg-white px-4 text-sm font-medium text-slate-900 outline-none transition focus:border-[#2563eb]"
+                className="h-12 rounded-2xl border border-gray-200 bg-white px-4 text-sm font-medium text-slate-900 outline-none transition focus:border-slate-900"
               >
                 {availableYears.map((year) => (
                   <option key={year} value={year}>
@@ -186,7 +186,7 @@ export function InsightsPage() {
             <button
               type="button"
               onClick={exportMeetingPacket}
-              className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-[#2563eb] px-5 text-sm font-semibold text-white transition hover:bg-[#1d4ed8]"
+              className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 text-sm font-semibold text-white transition hover:bg-slate-800"
             >
               <FileText className="h-4 w-4" />
               Export meeting packet
