@@ -632,7 +632,8 @@ export function getDashboardInsights(metrics: SundayMetric[], filters?: Comparis
   const scopedMetrics = scopedCampuses.length > 0
     ? metrics.filter((metric) => scopedCampuses.includes(metric.campus))
     : metrics;
-  const dates = getUniqueSortedDates(scopedMetrics);
+  const metricBearingRecords = scopedMetrics.filter((metric) => getRecordAvailableMetricFields(metric).length > 0);
+  const dates = getUniqueSortedDates(metricBearingRecords);
   const latestDate = dates.at(-1) ?? null;
   const campuses = scopedCampuses;
 
@@ -2498,12 +2499,16 @@ export type EventNote = {
 export function getEventNotes(metrics: SundayMetric[]): EventNote[] {
   const seen = new Map<string, string>();
   for (const metric of metrics) {
-    if (metric.notes && !seen.has(metric.service_date)) {
-      seen.set(metric.service_date, metric.notes);
+    if (metric.notes) {
+      const key = [metric.service_date, metric.campus, metric.service_time ?? "", metric.notes].join("|");
+
+      if (!seen.has(key)) {
+        seen.set(key, metric.campus ? `${metric.campus}: ${metric.notes}` : metric.notes);
+      }
     }
   }
   return Array.from(seen.entries())
-    .map(([date, note]) => ({ date, note }))
+    .map(([key, note]) => ({ date: key.split("|")[0], note }))
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 

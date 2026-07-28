@@ -4,6 +4,7 @@ import { KpiCard } from "../components/kpi-card";
 import { DashboardChart } from "../components/dashboard-chart";
 import { InsightsPanel } from "../components/insights-panel";
 import { CampusPulseCard } from "../components/campus-pulse";
+import { ConversionFunnelCard } from "../components/conversion-funnel-card";
 import { DistributionCard } from "../components/distribution-card";
 import { YtdCard } from "../components/ytd-card";
 import {
@@ -159,6 +160,13 @@ export function DashboardPage() {
       </section>
 
       <YtdCard summary={ytdSummary} />
+
+      <ConversionFunnelCard
+        metrics={metrics}
+        campuses={filters.selectedCampuses}
+        year={filters.periodA.year}
+        description="Track whether first-time guest reach is turning into visible next-step movement in the selected campus scope."
+      />
 
       {bigEventOverview && <BigEventOutlookCard overview={bigEventOverview} />}
 

@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import type { ComparisonFilters, KpiKey, Period } from "../lib/mock-data";
 import { getBigEventOverview } from "../lib/big-events";
+import { ConversionFunnelCard } from "../components/conversion-funnel-card";
 import {
   buildComparisonBrief,
   buildComparisonHtml,
@@ -308,6 +309,14 @@ export function InsightsPage() {
       </section>
 
       <DeepReportThesis report={deepReport} />
+
+      <ConversionFunnelCard
+        metrics={metrics}
+        campuses={selectedCampuses}
+        year={selectedYear}
+        title="Conversion and pathway health"
+        description="A deeper read on whether guest reach is translating into Growth Track movement, baptism response, and visible next steps."
+      />
 
       <CampusDiagnosticDossiers dossiers={deepReport.campuses} />
 

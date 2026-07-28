@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { FileUp, RotateCcw, Send, Upload } from "lucide-react";
+import { AlertTriangle, FileUp, RotateCcw, Send, Upload } from "lucide-react";
 import { useSundayMetrics } from "../hooks/use-sunday-metrics";
 import { mergeSundayMetrics, parseSundayMetricsCsv, saveImportedMetrics, type SundayMetric } from "../lib/sunday-metrics";
 
@@ -16,6 +16,18 @@ const entryCampusOptions = [
 ] as const;
 
 const serviceTimes = ["8:30AM", "10:15AM", "12PM", "1:45PM"] as const;
+
+const anomalyTypes = [
+  "Power outage",
+  "Weather closure",
+  "Facility issue",
+  "No Sunday service",
+  "Holiday schedule",
+  "Special event",
+  "Staff transition",
+  "Campus pastor transition",
+  "Other",
+] as const;
 
 const metricFields = [
   { key: "attendance", label: "Attendance" },
@@ -74,6 +86,11 @@ export function EntryPage() {
   const [campus, setCampus] = useState<string>(campusOptions[0] ?? "");
   const [serviceDate, setServiceDate] = useState(getMostRecentSundayIso());
   const [serviceEntries, setServiceEntries] = useState(createInitialEntries);
+  const [anomalyDate, setAnomalyDate] = useState(getMostRecentSundayIso());
+  const [anomalyCampus, setAnomalyCampus] = useState<string>(campusOptions[0] ?? "");
+  const [anomalyType, setAnomalyType] = useState<(typeof anomalyTypes)[number]>("Power outage");
+  const [anomalyNoService, setAnomalyNoService] = useState(true);
+  const [anomalyNote, setAnomalyNote] = useState("");
   const [message, setMessage] = useState("Enter a campus Sunday manually or upload a CSV to merge new service data into the current dataset.");
   const [error, setError] = useState("");
 
@@ -82,6 +99,12 @@ export function EntryPage() {
       setCampus(campusOptions[0]);
     }
   }, [campus, campusOptions]);
+
+  useEffect(() => {
+    if (!anomalyCampus && campusOptions.length > 0) {
+      setAnomalyCampus(campusOptions[0]);
+    }
+  }, [anomalyCampus, campusOptions]);
 
   const totals = useMemo(() => {
     return serviceTimes.reduce(
@@ -189,6 +212,27 @@ export function EntryPage() {
     } finally {
       event.target.value = "";
     }
+  };
+
+  const submitAnomalyNote = () => {
+    if (!anomalyCampus) {
+      setError("Select a campus before saving an operational context note.");
+      return;
+    }
+
+    if (!anomalyNote.trim() && anomalyType === "Other") {
+      setError("Add a short note so leaders know what happened.");
+      return;
+    }
+
+    const record = buildAnomalyRecord(anomalyDate, anomalyCampus, anomalyType, anomalyNote, anomalyNoService);
+    const merged = mergeSundayMetrics(metrics, [record]);
+    saveImportedMetrics(merged);
+    setError("");
+    setMessage(
+      `Saved a ${anomalyType.toLowerCase()} context note for ${anomalyCampus} on ${anomalyDate}. Reports will use it to explain unusual movement without adding fake metric totals.`,
+    );
+    setAnomalyNote("");
   };
 
   return (
@@ -414,6 +458,100 @@ export function EntryPage() {
           </div>
         )}
       </section>
+
+      <section className="rounded-[30px] border border-gray-200 bg-white p-6 lg:p-7">
+        <div className="flex flex-col gap-5 border-b border-gray-200 pb-5 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#fff7ed] text-[#c2410c]">
+                <AlertTriangle className="h-4 w-4" />
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Operational context</p>
+                <h2 className="mt-1 text-2xl font-semibold tracking-[-0.04em] text-slate-950">
+                  Log anomalies that explain the numbers
+                </h2>
+              </div>
+            </div>
+            <p className="mt-4 max-w-3xl text-sm leading-7 text-gray-600">
+              Use this for things like "BWI had a power outage on week 1 of July and held no Sunday service."
+              These notes flow into dashboard and report analysis without counting as attendance, volunteer, or next-step
+              metric rows.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={submitAnomalyNote}
+            className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-[#111827] px-5 text-sm font-semibold text-white transition hover:bg-black"
+          >
+            <Send className="h-4 w-4" />
+            Save context note
+          </button>
+        </div>
+
+        <div className="mt-6 grid gap-4 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+          <div className="grid gap-4 rounded-[28px] border border-gray-200 bg-[#fbfbfc] p-5 sm:grid-cols-2">
+            <Field label="Date">
+              <input
+                type="date"
+                value={anomalyDate}
+                onChange={(event) => setAnomalyDate(event.target.value)}
+                className={inputClassName}
+              />
+            </Field>
+
+            <Field label="Campus">
+              <select value={anomalyCampus} onChange={(event) => setAnomalyCampus(event.target.value)} className={inputClassName}>
+                {campusOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <Field label="Context type">
+              <select
+                value={anomalyType}
+                onChange={(event) => setAnomalyType(event.target.value as (typeof anomalyTypes)[number])}
+                className={inputClassName}
+              >
+                {anomalyTypes.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <label className="flex min-h-12 items-center gap-3 rounded-2xl border border-gray-200 bg-white px-4 text-sm font-semibold text-slate-800">
+              <input
+                type="checkbox"
+                checked={anomalyNoService}
+                onChange={(event) => setAnomalyNoService(event.target.checked)}
+                className="h-4 w-4 rounded border-gray-300 text-[#2563eb]"
+              />
+              No Sunday service held
+            </label>
+          </div>
+
+          <div className="rounded-[28px] border border-gray-200 bg-[#fbfbfc] p-5">
+            <Field label="Context note">
+              <textarea
+                value={anomalyNote}
+                onChange={(event) => setAnomalyNote(event.target.value)}
+                className={`${inputClassName} min-h-32 resize-none py-3`}
+                placeholder="Example: Transformer issue caused a power outage, so the BWI campus did not hold services on July week 1."
+              />
+            </Field>
+            <p className="mt-3 text-xs leading-5 text-gray-500">
+              Saved notes become report context. They are intentionally separated from metric totals so executive
+              analysis can explain unusual drops without treating them as normal performance.
+            </p>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
@@ -448,6 +586,35 @@ function buildEntryRecord(
   } satisfies SundayMetric;
 }
 
+function buildAnomalyRecord(
+  serviceDate: string,
+  campus: string,
+  anomalyType: string,
+  note: string,
+  noService: boolean,
+) {
+  const cleanedType = anomalyType.trim() || "Operational anomaly";
+  const cleanedNote = note.trim();
+  const noteBody = [cleanedType, cleanedNote].filter(Boolean).join(": ");
+  const noServiceSuffix = noService ? " No Sunday service held." : "";
+
+  return {
+    id: `${serviceDate}-${campus}-context-${slugify(cleanedType)}-${Date.now()}`,
+    service_date: serviceDate,
+    campus,
+    service_time: `Context: ${cleanedType}`,
+    attendance: 0,
+    volunteers: 0,
+    first_time_guests: 0,
+    salvations: 0,
+    kids: 0,
+    growth_track: 0,
+    baptism: 0,
+    notes: `${noteBody || "Operational anomaly."}${noServiceSuffix}`.trim(),
+    available_metrics: [],
+  } satisfies SundayMetric;
+}
+
 function readMetricValue(value: string) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -462,6 +629,10 @@ function getMostRecentSundayIso() {
   const month = String(localDate.getMonth() + 1).padStart(2, "0");
   const date = String(localDate.getDate()).padStart(2, "0");
   return `${year}-${month}-${date}`;
+}
+
+function slugify(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "context";
 }
 
 function ModeButton({
