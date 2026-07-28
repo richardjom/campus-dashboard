@@ -86,7 +86,6 @@ export function InsightsPage() {
     source === "imported" ? "Imported dataset active" : source === "bundle" ? "Bundled campus dataset" : "Mock dataset active";
   const reportDateLabel = formatCalendarDate(new Date());
   const bigEventOverview = useMemo(() => getBigEventOverview(bigEventRecords, metrics), [bigEventRecords, metrics]);
-  const chairSummary = useMemo(() => buildChairSummary(insights, scopeLabel), [insights, scopeLabel]);
   const meetingTalkingPoints = useMemo(() => buildMeetingTalkingPoints(insights, scopeLabel), [insights, scopeLabel]);
   const riskFlags = useMemo(() => buildRiskFlags(insights, scopeLabel), [insights, scopeLabel]);
   const sundayDecisions = useMemo(() => buildSundayDecisions(insights, scopeLabel), [insights, scopeLabel]);
@@ -195,118 +194,13 @@ export function InsightsPage() {
         </div>
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1.28fr)_minmax(320px,0.88fr)]">
-        <section className="rounded-[30px] border border-gray-200 bg-white p-6 lg:p-7">
-          <div className="flex items-start justify-between gap-4 border-b border-gray-200 pb-5">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Leadership opening read</p>
-              <h2 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-950">
-                {insights.executiveBrief?.headline ?? "Daily leadership report"}
-              </h2>
-              <p className="mt-2 text-xs text-gray-500">{comparisonLabel}</p>
-            </div>
-            <span
-              className={[
-                "inline-flex rounded-full px-3 py-1 text-xs font-semibold",
-                insights.scorecard?.verdict === "Strong"
-                  ? "bg-emerald-100 text-emerald-700"
-                  : insights.scorecard?.verdict === "Healthy"
-                    ? "bg-sky-100 text-sky-700"
-                    : insights.scorecard?.verdict === "Critical"
-                      ? "bg-rose-100 text-rose-700"
-                      : "bg-amber-100 text-amber-700",
-              ].join(" ")}
-            >
-              {insights.scorecard?.verdict ?? "Watch"}
-            </span>
-          </div>
-
-          <p className="mt-5 text-sm leading-7 text-slate-700">
-            {insights.executiveBrief?.summary ??
-              "The report will begin generating once enough current and prior data exists for a comparable read."}
-          </p>
-
-          {insights.scorecard && (
-            <div className="mt-5 grid gap-3 sm:grid-cols-3">
-              <ScorePill
-                label="Current growth"
-                value={formatSignedPercent(insights.scorecard.currentChange)}
-                tone={insights.scorecard.currentChange >= 0 ? "positive" : "warning"}
-              />
-              <ScorePill
-                label="Growth speed"
-                value={formatDeltaPoints(insights.scorecard.acceleration)}
-                tone={
-                  insights.scorecard.acceleration === null
-                    ? "neutral"
-                    : insights.scorecard.acceleration >= 0
-                      ? "positive"
-                      : "warning"
-                }
-              />
-              <ScorePill
-                label="Seasonal baseline"
-                value={formatSignedPercent(insights.scorecard.seasonalDelta, "Limited history")}
-                tone={
-                  insights.scorecard.seasonalDelta === null
-                    ? "neutral"
-                    : insights.scorecard.seasonalDelta >= 0
-                      ? "positive"
-                      : "warning"
-                }
-              />
-            </div>
-          )}
-        </section>
-
-        <section className="rounded-[30px] border border-gray-200 bg-white p-6 lg:p-7">
-          <div className="border-b border-gray-200 pb-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Chair summary</p>
-            <h2 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-950">What the room should hear first</h2>
-          </div>
-
-          <div className="mt-5 space-y-3">
-            {chairSummary.map((point) => (
-              <div key={point} className="rounded-2xl border border-gray-200 bg-[#fbfbfc] p-4 text-sm leading-6 text-slate-700">
-                {point}
-              </div>
-            ))}
-          </div>
-
-          <div className="mt-5 border-t border-gray-200 pt-5">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Risk flags</p>
-              <AlertTriangle className="h-4 w-4 text-[#c2410c]" />
-            </div>
-
-            <div className="mt-3 space-y-3">
-              {riskFlags.map((flag) => (
-                <div key={flag.title} className="rounded-2xl border border-gray-200 bg-[#fbfbfc] p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <p className="text-sm font-semibold text-slate-950">{flag.title}</p>
-                    <span
-                      className={[
-                        "inline-flex rounded-full px-3 py-1 text-[11px] font-semibold",
-                        flag.level === "High" ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700",
-                      ].join(" ")}
-                    >
-                      {flag.level}
-                    </span>
-                  </div>
-                  <p className="mt-2 text-sm leading-6 text-slate-700">{flag.detail}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {insights.scorecard?.dataCaveat && (
-            <div className="mt-5 rounded-2xl border border-dashed border-gray-200 bg-[#fbfbfc] p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Data caveat</p>
-              <p className="mt-2 text-sm leading-6 text-gray-600">{insights.scorecard.dataCaveat}</p>
-            </div>
-          )}
-        </section>
-      </section>
+      <ExecutiveDecisionBrief
+        insights={insights}
+        scopeLabel={scopeLabel}
+        comparisonLabel={comparisonLabel}
+        decisions={sundayDecisions}
+        riskFlags={riskFlags}
+      />
 
       <DeepReportThesis report={deepReport} />
 
@@ -651,6 +545,217 @@ type DeepReport = {
   questions: string[];
   dataNeeds: string[];
 };
+
+type DecisionBriefStatus = "Healthy" | "Watch" | "At Risk" | "Directional";
+
+function ExecutiveDecisionBrief({
+  insights,
+  scopeLabel,
+  comparisonLabel,
+  decisions,
+  riskFlags,
+}: {
+  insights: ReturnType<typeof getDashboardInsights>;
+  scopeLabel: string;
+  comparisonLabel: string;
+  decisions: Array<{ label: string; title: string; detail: string; priority: "Now" | "This week" | "Monitor" }>;
+  riskFlags: ReturnType<typeof buildRiskFlags>;
+}) {
+  const scorecard = insights.scorecard;
+  const verdict = scorecard?.verdict ?? "Watch";
+  const kpis = buildDecisionBriefKpis(insights);
+  const changeRows = buildDecisionBriefChangeRows(insights);
+  const diagnosisCards = buildDiagnosisMatrix(insights, riskFlags);
+  const activeDecisionCount = decisions.filter((decision) => decision.priority !== "Monitor").length;
+  const primaryDecision = decisions[0];
+
+  return (
+    <section className="rounded-[30px] border border-gray-200 bg-white p-6 lg:p-7">
+      <div className="flex flex-col gap-5 border-b border-gray-200 pb-6 xl:flex-row xl:items-start xl:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Executive decision brief</p>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <h2 className="text-3xl font-semibold tracking-[-0.06em] text-slate-950">
+              {insights.executiveBrief?.headline ?? `${scopeLabel} decision read`}
+            </h2>
+            <span className={verdictPillClass(verdict)}>{verdict}</span>
+          </div>
+          <p className="mt-2 text-xs font-medium text-gray-500">{comparisonLabel}</p>
+        </div>
+
+        <div className="rounded-[24px] border border-gray-200 bg-[#fbfbfc] p-4 xl:max-w-[360px]">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Primary decision</p>
+          <p className="mt-2 text-sm font-semibold leading-6 text-slate-950">
+            {primaryDecision?.title ?? "Keep monitoring the current operating plan"}
+          </p>
+          <p className="mt-2 text-xs leading-5 text-gray-600">
+            {primaryDecision
+              ? `${getDecisionOwner(primaryDecision.label)} owns the next move by ${getDecisionDeadline(primaryDecision.priority)}.`
+              : "No immediate decision is being forced by the current scorecard."}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-6 rounded-[26px] border border-gray-200 bg-[#fbfbfc] p-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Topline verdict</p>
+            <p className="mt-2 max-w-4xl text-lg font-semibold leading-8 tracking-[-0.03em] text-slate-950">
+              {buildToplineVerdict(insights, scopeLabel)}
+            </p>
+          </div>
+          <div className="flex h-11 w-11 flex-none items-center justify-center rounded-2xl bg-white text-slate-700">
+            <LineChart className="h-4 w-4" />
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+        {kpis.map((kpi) => (
+          <DecisionKpiCard key={kpi.label} {...kpi} />
+        ))}
+      </div>
+
+      <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+        <div className="rounded-[26px] border border-gray-200">
+          <div className="border-b border-gray-200 bg-[#fbfbfc] px-5 py-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">What changed</p>
+            <h3 className="mt-1 text-xl font-semibold tracking-[-0.04em] text-slate-950">Scorecard movement</h3>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {changeRows.map((row) => (
+              <div key={row.label} className="grid grid-cols-[1fr_auto] gap-4 px-5 py-4">
+                <div>
+                  <p className="text-sm font-semibold text-slate-950">{row.label}</p>
+                  <p className="mt-1 text-xs leading-5 text-gray-500">{row.note}</p>
+                </div>
+                <p
+                  className={[
+                    "text-right text-lg font-semibold tracking-[-0.03em]",
+                    row.tone === "positive" ? "text-emerald-700" : row.tone === "warning" ? "text-rose-700" : "text-slate-900",
+                  ].join(" ")}
+                >
+                  {row.value}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-[26px] border border-gray-200">
+          <div className="border-b border-gray-200 bg-[#fbfbfc] px-5 py-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Diagnosis matrix</p>
+            <h3 className="mt-1 text-xl font-semibold tracking-[-0.04em] text-slate-950">Why it may be happening</h3>
+          </div>
+          <div className="grid gap-3 p-4 md:grid-cols-2">
+            {diagnosisCards.map((card) => (
+              <DiagnosisCard key={card.lens} {...card} />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-6 rounded-[26px] border border-gray-200">
+        <div className="flex flex-col gap-3 border-b border-gray-200 bg-[#fbfbfc] px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Decision required</p>
+            <h3 className="mt-1 text-xl font-semibold tracking-[-0.04em] text-slate-950">Owner, deadline, expected impact</h3>
+          </div>
+          <span className="inline-flex rounded-full border border-gray-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
+            {activeDecisionCount} active decision{activeDecisionCount === 1 ? "" : "s"}
+          </span>
+        </div>
+
+        <div className="divide-y divide-gray-100">
+          {decisions.slice(0, 4).map((decision) => (
+            <DecisionRow key={`${decision.label}-${decision.title}`} decision={decision} />
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function DecisionKpiCard({
+  label,
+  value,
+  note,
+  tone,
+}: {
+  label: string;
+  value: string;
+  note: string;
+  tone: ReportTone;
+}) {
+  return (
+    <div className="rounded-[22px] border border-gray-200 bg-[#fbfbfc] p-4">
+      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">{label}</p>
+      <p
+        className={[
+          "mt-3 text-2xl font-semibold tracking-[-0.05em]",
+          tone === "positive" ? "text-emerald-700" : tone === "warning" ? "text-rose-700" : "text-slate-950",
+        ].join(" ")}
+      >
+        {value}
+      </p>
+      <p className="mt-2 text-xs leading-5 text-gray-500">{note}</p>
+    </div>
+  );
+}
+
+function DiagnosisCard({
+  lens,
+  status,
+  evidence,
+}: {
+  lens: string;
+  status: DecisionBriefStatus;
+  evidence: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-4">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-sm font-semibold text-slate-950">{lens}</p>
+        <span className={diagnosisStatusClass(status)}>{status}</span>
+      </div>
+      <p className="mt-3 text-xs leading-5 text-gray-600">{evidence}</p>
+    </div>
+  );
+}
+
+function DecisionRow({
+  decision,
+}: {
+  decision: { label: string; title: string; detail: string; priority: "Now" | "This week" | "Monitor" };
+}) {
+  return (
+    <div className="grid gap-4 px-5 py-5 xl:grid-cols-[minmax(0,1.15fr)_0.75fr_0.7fr_minmax(0,1fr)]">
+      <div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span
+            className={[
+              "inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold",
+              decision.priority === "Now"
+                ? "bg-rose-100 text-rose-700"
+                : decision.priority === "This week"
+                  ? "bg-amber-100 text-amber-700"
+                  : "bg-slate-100 text-slate-700",
+            ].join(" ")}
+          >
+            {decision.priority}
+          </span>
+          <span className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">{decision.label}</span>
+        </div>
+        <p className="mt-2 text-sm font-semibold leading-6 text-slate-950">{decision.title}</p>
+        <p className="mt-1 text-xs leading-5 text-gray-600">{decision.detail}</p>
+      </div>
+
+      <ReportMetric label="Owner" value={getDecisionOwner(decision.label)} />
+      <ReportMetric label="Deadline" value={getDecisionDeadline(decision.priority)} />
+      <ReportMetric label="Expected impact" value={getExpectedImpact(decision.label)} />
+    </div>
+  );
+}
 
 function DeepReportThesis({ report }: { report: DeepReport }) {
   return (
@@ -1139,6 +1244,276 @@ function buildSundayDecisions(
   }
 
   return items.slice(0, 4);
+}
+
+function buildDecisionBriefKpis(insights: ReturnType<typeof getDashboardInsights>) {
+  const scorecard = insights.scorecard;
+  const acceleration = scorecard?.acceleration ?? null;
+  const averageVolunteerCoverage = averageRatio(insights.health.map((health) => health.volunteerRatio));
+  const averageFtgRate = averageRatio(insights.health.map((health) => health.ftgRate));
+  const urgentActions = insights.actionCards.filter((card) => card.urgency !== "Monitor").length;
+
+  return [
+    {
+      label: "Verdict",
+      value: scorecard?.verdict ?? "Watch",
+      note: "Overall executive read",
+      tone: getVerdictTone(scorecard?.verdict ?? "Watch"),
+    },
+    {
+      label: "Vs prior",
+      value: formatSignedPercent(scorecard?.currentChange ?? null),
+      note: `${insights.metricLabel} movement`,
+      tone: getToneForChange(scorecard?.currentChange ?? null),
+    },
+    {
+      label: "Growth speed",
+      value: formatDeltaPoints(acceleration),
+      note: "Current vs prior cycle",
+      tone: acceleration === null ? "neutral" : acceleration >= 0 ? "positive" : "warning",
+    },
+    {
+      label: "Seasonality",
+      value: formatSignedPercent(scorecard?.seasonalDelta ?? null, "N/A"),
+      note: "Same window baseline",
+      tone: getToneForChange(scorecard?.seasonalDelta ?? null),
+    },
+    {
+      label: "Volunteer cover",
+      value: formatRatioPercentOptional(averageVolunteerCoverage),
+      note: `Watch ${formatRatioPercent(churchGrowthBenchmarks.weeklyVolunteerCoverageWatch)}`,
+      tone:
+        averageVolunteerCoverage === null
+          ? "neutral"
+          : averageVolunteerCoverage < churchGrowthBenchmarks.weeklyVolunteerCoverageWatch
+            ? "warning"
+            : "positive",
+    },
+    {
+      label: "Active decisions",
+      value: urgentActions.toString(),
+      note: "Decide now / this week",
+      tone: urgentActions > 0 ? "warning" : "positive",
+    },
+  ] satisfies Array<{ label: string; value: string; note: string; tone: ReportTone }>;
+}
+
+function buildDecisionBriefChangeRows(insights: ReturnType<typeof getDashboardInsights>) {
+  const scorecard = insights.scorecard;
+  const acceleration = scorecard?.acceleration ?? null;
+  const averageVolunteerCoverage = averageRatio(insights.health.map((health) => health.volunteerRatio));
+  const averageFtgRate = averageRatio(insights.health.map((health) => health.ftgRate));
+  const weakestCoverage = insights.health.length
+    ? [...insights.health].sort((left, right) => left.volunteerRatio - right.volunteerRatio)[0]
+    : null;
+
+  return [
+    {
+      label: "Current comparison",
+      value: formatSignedPercent(scorecard?.currentChange ?? null),
+      note: `${insights.metricLabel} versus the aligned prior comparison window.`,
+      tone: getToneForChange(scorecard?.currentChange ?? null),
+    },
+    {
+      label: "Prior growth cycle",
+      value: formatSignedPercent(scorecard?.priorChange ?? null, "N/A"),
+      note: "Shows whether this is acceleration or a one-period swing.",
+      tone: getToneForChange(scorecard?.priorChange ?? null),
+    },
+    {
+      label: "Growth speed",
+      value: formatDeltaPoints(acceleration),
+      note: "Difference between the current comparison and the prior cycle.",
+      tone: acceleration === null ? "neutral" : acceleration >= 0 ? "positive" : "warning",
+    },
+    {
+      label: "Seasonal baseline",
+      value: formatSignedPercent(scorecard?.seasonalDelta ?? null, "N/A"),
+      note: "Compares the current window to the same historical season.",
+      tone: getToneForChange(scorecard?.seasonalDelta ?? null),
+    },
+    {
+      label: "Average volunteer coverage",
+      value: formatRatioPercentOptional(averageVolunteerCoverage),
+      note: weakestCoverage ? `${weakestCoverage.campus} is the thinnest coverage point.` : "Volunteer coverage is not available yet.",
+      tone:
+        averageVolunteerCoverage === null
+          ? "neutral"
+          : averageVolunteerCoverage < churchGrowthBenchmarks.weeklyVolunteerCoverageWatch
+            ? "warning"
+            : "positive",
+    },
+    {
+      label: "First-time guest rate",
+      value: formatRatioPercentOptional(averageFtgRate),
+      note: `Healthy reach range ${formatRatioPercent(churchGrowthBenchmarks.firstTimeGuestRateMin)}-${formatRatioPercent(churchGrowthBenchmarks.firstTimeGuestRateMax)}.`,
+      tone:
+        averageFtgRate === null
+          ? "neutral"
+          : averageFtgRate < churchGrowthBenchmarks.firstTimeGuestRateMin
+            ? "warning"
+            : "positive",
+    },
+  ] satisfies Array<{ label: string; value: string; note: string; tone: ReportTone }>;
+}
+
+function buildDiagnosisMatrix(
+  insights: ReturnType<typeof getDashboardInsights>,
+  riskFlags: ReturnType<typeof buildRiskFlags>,
+) {
+  const scorecard = insights.scorecard;
+  const averageVolunteerCoverage = averageRatio(insights.health.map((health) => health.volunteerRatio));
+  const averageFtgRate = averageRatio(insights.health.map((health) => health.ftgRate));
+  const weakestCoverage = insights.health.length
+    ? [...insights.health].sort((left, right) => left.volunteerRatio - right.volunteerRatio)[0]
+    : null;
+  const connectionCard = insights.actionCards.find((card) => card.lens === "Connection");
+  const capacityCard = insights.actionCards.find((card) => card.lens === "Capacity");
+  const reachCard = insights.actionCards.find((card) => card.lens === "Reach");
+  const transitionCount = scorecard?.transitions.length ?? 0;
+  const seasonalDelta = scorecard?.seasonalDelta ?? null;
+
+  return [
+    {
+      lens: "Reach",
+      status: classifyMetricStatus(scorecard?.currentChange ?? null, { positiveAt: 5, warningAt: -5 }),
+      evidence: reachCard?.hypothesis ??
+        `Attendance/guest reach is ${formatSignedPercent(scorecard?.currentChange ?? null).toLowerCase()} versus the aligned prior window; FTG rate is ${formatRatioPercentOptional(averageFtgRate)}.`,
+    },
+    {
+      lens: "Connection",
+      status: connectionCard ? urgencyToStatus(connectionCard.urgency) : averageFtgRate !== null && averageFtgRate < churchGrowthBenchmarks.firstTimeGuestRateMin ? "Watch" : "Directional",
+      evidence: connectionCard?.hypothesis ??
+        `Use FTG, Growth Track, baptism, and return-visit data to confirm whether people are moving from attendance into next steps.`,
+    },
+    {
+      lens: "Capacity",
+      status:
+        capacityCard
+          ? urgencyToStatus(capacityCard.urgency)
+          : averageVolunteerCoverage === null
+            ? "Directional"
+            : averageVolunteerCoverage < churchGrowthBenchmarks.weeklyVolunteerCoverageWatch
+              ? "At Risk"
+              : averageVolunteerCoverage < churchGrowthBenchmarks.weeklyVolunteerCoverageHealthy
+                ? "Watch"
+                : "Healthy",
+      evidence: capacityCard?.hypothesis ??
+        (weakestCoverage
+          ? `${weakestCoverage.campus} is the thinnest volunteer coverage point at ${formatRatioPercent(weakestCoverage.volunteerRatio)}.`
+          : "Volunteer, kids, parking, and room capacity data will make this sharper."),
+    },
+    {
+      lens: "Seasonality",
+      status: classifyMetricStatus(seasonalDelta, { positiveAt: 3, warningAt: -5 }),
+      evidence:
+        seasonalDelta === null
+          ? "Historical same-season data is not deep enough yet to separate trend from calendar rhythm."
+          : `The selected window is ${formatSignedPercent(seasonalDelta).toLowerCase()} versus the same historical season.`,
+    },
+    {
+      lens: "Leadership",
+      status: transitionCount > 0 ? "Watch" : "Directional",
+      evidence:
+        transitionCount > 0
+          ? `${transitionCount} leadership or staff transition${transitionCount === 1 ? "" : "s"} logged in or around this scope; interpret momentum with that context.`
+          : "No campus pastor or staff transitions are logged yet, so leadership context remains a data gap.",
+    },
+    {
+      lens: "Data confidence",
+      status: riskFlags.some((flag) => flag.title.toLowerCase().includes("data") || flag.title.toLowerCase().includes("context")) ? "Watch" : "Healthy",
+      evidence:
+        scorecard?.dataCaveat ??
+        "The read is strongest when metrics, anomalies, transitions, capacity, and person-level next-step data are all current.",
+    },
+  ] satisfies Array<{ lens: string; status: DecisionBriefStatus; evidence: string }>;
+}
+
+function buildToplineVerdict(insights: ReturnType<typeof getDashboardInsights>, scopeLabel: string) {
+  const scorecard = insights.scorecard;
+  const topAction = insights.actionCards[0];
+
+  if (!scorecard) {
+    return `${scopeLabel} needs more comparable data before the report should force an executive decision.`;
+  }
+
+  if (topAction) {
+    return `${scopeLabel} is rated ${scorecard.verdict.toLowerCase()}; the most important leadership read is ${topAction.lens.toLowerCase()}: ${topAction.hypothesis}`;
+  }
+
+  if (scorecard.currentChange <= -5) {
+    return `${scopeLabel} is down versus the aligned prior window, so leadership should separate reach, connection, capacity, seasonality, and transition context before changing strategy.`;
+  }
+
+  if (scorecard.currentChange >= 5) {
+    return `${scopeLabel} is growing versus the aligned prior window; the executive question is whether the growth is durable enough to support with volunteers, kids capacity, and next-step pathways.`;
+  }
+
+  return `${scopeLabel} is stable, so the decision is less about a broad strategy change and more about protecting consistency, capacity, and next-step conversion.`;
+}
+
+function getVerdictTone(verdict: "Strong" | "Healthy" | "Watch" | "Critical"): ReportTone {
+  if (verdict === "Strong" || verdict === "Healthy") return "positive";
+  if (verdict === "Critical") return "warning";
+  return "neutral";
+}
+
+function classifyMetricStatus(
+  value: number | null,
+  thresholds: { positiveAt: number; warningAt: number },
+): DecisionBriefStatus {
+  if (value === null) return "Directional";
+  if (value >= thresholds.positiveAt) return "Healthy";
+  if (value <= thresholds.warningAt) return "At Risk";
+  return "Watch";
+}
+
+function urgencyToStatus(urgency: "Decide now" | "This week" | "Monitor"): DecisionBriefStatus {
+  if (urgency === "Decide now") return "At Risk";
+  if (urgency === "This week") return "Watch";
+  return "Directional";
+}
+
+function diagnosisStatusClass(status: DecisionBriefStatus) {
+  const base = "inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold";
+  if (status === "Healthy") return `${base} bg-emerald-100 text-emerald-700`;
+  if (status === "At Risk") return `${base} bg-rose-100 text-rose-700`;
+  if (status === "Watch") return `${base} bg-amber-100 text-amber-700`;
+  return `${base} bg-slate-100 text-slate-700`;
+}
+
+function getDecisionOwner(label: string) {
+  const normalized = label.toLowerCase();
+  if (normalized.includes("capacity")) return "Campus Pastor + Ministry Leads";
+  if (normalized.includes("connection")) return "Connections Director";
+  if (normalized.includes("reach")) return "Campus Pastor + Outreach";
+  if (normalized.includes("season")) return "Central Strategy Team";
+  if (normalized.includes("data")) return "Operations / Data Lead";
+  if (normalized.includes("leadership")) return "Executive Team";
+  return "Campus Pastor";
+}
+
+function getDecisionDeadline(priority: "Now" | "This week" | "Monitor") {
+  if (priority === "Now") return "7 days";
+  if (priority === "This week") return "14 days";
+  return "Next review";
+}
+
+function getExpectedImpact(label: string) {
+  const normalized = label.toLowerCase();
+  if (normalized.includes("capacity")) return "Protect service quality";
+  if (normalized.includes("connection")) return "Improve next-step movement";
+  if (normalized.includes("reach")) return "Increase guest flow";
+  if (normalized.includes("season")) return "Reduce low-season drop";
+  if (normalized.includes("data")) return "Sharpen future reads";
+  if (normalized.includes("leadership")) return "Explain momentum shifts";
+  return "Clarify operating focus";
+}
+
+function averageRatio(values: number[]) {
+  const usable = values.filter((value) => Number.isFinite(value) && value > 0);
+  if (usable.length === 0) return null;
+  return usable.reduce((sum, value) => sum + value, 0) / usable.length;
 }
 
 const reportFieldMap: Record<KpiKey, keyof ReportTotals> = {
