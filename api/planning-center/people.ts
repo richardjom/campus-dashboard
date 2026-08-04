@@ -50,8 +50,17 @@ type PcoRawPerson = {
   birthdate: string | null;
 };
 
+type PcoImportProgress = {
+  loaded: number;
+  total: number | null;
+  page: number;
+  pageCount: number | null;
+  message: string;
+};
+
 const PCO_BASE = "https://api.planningcenteronline.com";
 const USER_AGENT = "Sunday Base Planning Center Import";
+const PEOPLE_PER_PAGE = 100;
 
 export default async function handler(
   req: { body?: unknown; method?: string; on?: (event: string, cb: (chunk?: string) => void) => void },
@@ -59,6 +68,8 @@ export default async function handler(
     status?: (code: number) => { json: (body: unknown) => void };
     statusCode?: number;
     setHeader?: (name: string, value: string) => void;
+    flushHeaders?: () => void;
+    write?: (chunk: string) => void;
     end: (body: string) => void;
   },
 ) {
@@ -76,10 +87,43 @@ export default async function handler(
       return;
     }
 
-    const people = await fetchPcoPeople(credentials);
-    sendJson(res, 200, { data: people });
+    if (typeof res.write === "function") {
+      beginNdjsonStream(res);
+      writeNdjson(res, {
+        type: "progress",
+        loaded: 0,
+        total: null,
+        page: 0,
+        pageCount: null,
+        message: "Connected to Planning Center. Loading first page…",
+      });
+
+      const result = await fetchPcoPeople(credentials, (progress) => {
+        writeNdjson(res, { type: "progress", ...progress });
+      });
+
+      writeNdjson(res, {
+        type: "done",
+        data: result.people,
+        loaded: result.people.length,
+        total: result.total,
+        page: result.pageCount,
+        pageCount: result.pageCount,
+        message: "Import complete.",
+      });
+      res.end("");
+      return;
+    }
+
+    const result = await fetchPcoPeople(credentials);
+    sendJson(res, 200, { data: result.people });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected proxy error.";
+    if (typeof res.write === "function") {
+      writeNdjson(res, { type: "error", error: message });
+      res.end("");
+      return;
+    }
     sendJson(res, 500, { error: message });
   }
 }
@@ -88,11 +132,17 @@ function authHeader(credentials: ProxyPcoCredentials) {
   return `Basic ${Buffer.from(`${credentials.appId}:${credentials.secret}`).toString("base64")}`;
 }
 
-async function fetchPcoPeople(credentials: ProxyPcoCredentials) {
+async function fetchPcoPeople(
+  credentials: ProxyPcoCredentials,
+  onProgress?: (progress: PcoImportProgress) => void,
+) {
   const people: PcoRawPerson[] = [];
   let url: string | null = `${PCO_BASE}/people/v2/people?per_page=100&include=emails,phone_numbers`;
+  let page = 0;
+  let total: number | null = null;
 
   while (url) {
+    page += 1;
     const response = await fetch(url, {
       headers: {
         Authorization: authHeader(credentials),
@@ -107,8 +157,13 @@ async function fetchPcoPeople(credentials: ProxyPcoCredentials) {
     const json = (await response.json()) as {
       data: PcoApiPerson[];
       included?: Array<PcoApiEmail | PcoApiPhone>;
+      meta?: { total_count?: number; count?: number };
       links: { next?: string };
     };
+
+    if (typeof json.meta?.total_count === "number") {
+      total = json.meta.total_count;
+    }
 
     const emailsById = new Map<string, string>();
     const phonesById = new Map<string, string>();
@@ -143,10 +198,25 @@ async function fetchPcoPeople(credentials: ProxyPcoCredentials) {
       });
     }
 
+    const pageCount = total && total > 0 ? Math.ceil(total / PEOPLE_PER_PAGE) : null;
+    onProgress?.({
+      loaded: people.length,
+      total,
+      page,
+      pageCount,
+      message: pageCount
+        ? `Loaded page ${page} of ${pageCount} from Planning Center…`
+        : `Loaded ${people.length.toLocaleString()} people from Planning Center…`,
+    });
+
     url = json.links.next ?? null;
   }
 
-  return people;
+  return {
+    people,
+    total: total ?? people.length,
+    pageCount: page,
+  };
 }
 
 async function readJsonBody(req: { body?: unknown; on?: (event: string, cb: (chunk?: string) => void) => void }) {
@@ -205,6 +275,8 @@ function sendJson(
     status?: (code: number) => { json: (body: unknown) => void };
     statusCode?: number;
     setHeader?: (name: string, value: string) => void;
+    flushHeaders?: () => void;
+    write?: (chunk: string) => void;
     end: (body: string) => void;
   },
   statusCode: number,
@@ -218,4 +290,24 @@ function sendJson(
   res.statusCode = statusCode;
   res.setHeader?.("Content-Type", "application/json");
   res.end(JSON.stringify(payload));
+}
+
+function beginNdjsonStream(res: {
+  statusCode?: number;
+  setHeader?: (name: string, value: string) => void;
+  flushHeaders?: () => void;
+}) {
+  res.statusCode = 200;
+  res.setHeader?.("Content-Type", "application/x-ndjson; charset=utf-8");
+  res.setHeader?.("Cache-Control", "no-store");
+  res.flushHeaders?.();
+}
+
+function writeNdjson(
+  res: {
+    write?: (chunk: string) => void;
+  },
+  payload: unknown,
+) {
+  res.write?.(`${JSON.stringify(payload)}\n`);
 }

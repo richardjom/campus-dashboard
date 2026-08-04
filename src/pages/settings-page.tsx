@@ -36,6 +36,9 @@ export function SettingsPage() {
   const [importProgress, setImportProgress] = useState<PcoImportProgress>(initialImportProgress);
   const [importError, setImportError] = useState("");
   const [peopleCount, setPeopleCount] = useState(0);
+  const [importStartedAt, setImportStartedAt] = useState<number | null>(null);
+  const [lastProgressAt, setLastProgressAt] = useState<number | null>(null);
+  const [importClock, setImportClock] = useState(() => Date.now());
 
   useEffect(() => {
     const saved = loadPcoCredentials();
@@ -43,6 +46,17 @@ export function SettingsPage() {
     setImportSummary(loadPcoImportSummary());
     setPeopleCount(loadPeople().filter((p) => p.source === "pco").length);
   }, []);
+
+  useEffect(() => {
+    if (importStatus !== "importing") return;
+
+    setImportClock(Date.now());
+    const timer = window.setInterval(() => {
+      setImportClock(Date.now());
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [importStatus]);
 
   const handleTest = async () => {
     setConnectionStatus("testing");
@@ -78,8 +92,11 @@ export function SettingsPage() {
   };
 
   const runImport = async (creds: PcoCredentials) => {
+    const startedAt = Date.now();
     setImportStatus("importing");
     setImportError("");
+    setImportStartedAt(startedAt);
+    setLastProgressAt(startedAt);
     setImportProgress({
       loaded: 0,
       total: null,
@@ -90,6 +107,7 @@ export function SettingsPage() {
     try {
       const rawPeople = await fetchPcoPeople(creds, (progress) => {
         setImportProgress(progress);
+        setLastProgressAt(Date.now());
       });
       const merged = importPcopeople(rawPeople);
       const summary = {
@@ -108,11 +126,15 @@ export function SettingsPage() {
       setImportSummary(summary);
       setPeopleCount(merged.filter((p) => p.source === "pco").length);
       setImportStatus("done");
+      setImportStartedAt(null);
+      setLastProgressAt(null);
       if (rawPeople.length === 0) {
         setImportError("Planning Center returned 0 people for this import.");
       }
     } catch (err) {
       setImportStatus("error");
+      setImportStartedAt(null);
+      setLastProgressAt(null);
       setImportError(err instanceof Error ? err.message : "Import failed.");
     }
   };
@@ -134,13 +156,13 @@ export function SettingsPage() {
       return "Planning Center rejected the credentials. Double-check that the client ID and secret belong to the same Personal Access Token.";
     }
     if (importError.toLowerCase().includes("proxy")) {
-      return "The app could not reach the local import bridge. Refresh the app, and if needed restart the local dev server.";
+      return "The app could not reach the Planning Center import service. Refresh the page and try again.";
     }
     if (importError.toLowerCase().includes("network") || importError.toLowerCase().includes("reach")) {
-      return "The app reached the local bridge, but the bridge could not reach Planning Center. Check your internet connection and try again.";
+      return "The app reached the import service, but the service could not reach Planning Center. Check your internet connection and try again.";
     }
     if (importError.toLowerCase().includes("500") || importError.toLowerCase().includes("502") || importError.toLowerCase().includes("503")) {
-      return "Planning Center or the local bridge returned a server error. Wait a moment and try the import again.";
+      return "Planning Center or the import service returned a server error. Wait a moment and try the import again.";
     }
     return "The import did not finish cleanly. Try testing the connection first, then run the import again.";
   })();
@@ -158,6 +180,13 @@ export function SettingsPage() {
     importProgress.total && importProgress.total > 0
       ? Math.max(6, Math.min(100, Math.round((importProgress.loaded / importProgress.total) * 100)))
       : null;
+  const importElapsedSeconds = importStartedAt ? Math.max(0, Math.round((importClock - importStartedAt) / 1000)) : 0;
+  const secondsSinceProgress =
+    lastProgressAt && importStatus === "importing"
+      ? Math.max(0, Math.round((importClock - lastProgressAt) / 1000))
+      : null;
+  const importLooksStalled = secondsSinceProgress !== null && secondsSinceProgress >= 20;
+  const waitingForFirstPage = importStatus === "importing" && importProgress.loaded === 0 && importElapsedSeconds >= 10;
 
   return (
     <div className="space-y-6 lg:space-y-8">
@@ -385,8 +414,24 @@ export function SettingsPage() {
                   />
                 </div>
                 <p className="mt-2 text-xs text-[#1d4ed8]">
-                  Preview people will appear here as soon as the import finishes.
+                  {importLooksStalled
+                    ? `No new update for ${secondsSinceProgress} seconds. This may be stalled.`
+                    : waitingForFirstPage
+                      ? `Still waiting on the first page from Planning Center… ${importElapsedSeconds}s elapsed.`
+                      : `Preview people will appear here as soon as the import finishes.`}
                 </p>
+                <div className="mt-3 flex flex-wrap items-center gap-3 text-xs font-medium text-[#1d4ed8]">
+                  <span>{importElapsedSeconds}s elapsed</span>
+                  {secondsSinceProgress !== null && <span>Last update {secondsSinceProgress}s ago</span>}
+                </div>
+                {importLooksStalled && (
+                  <div className="mt-3 rounded-[18px] border border-amber-200 bg-amber-50 p-3">
+                    <p className="text-sm font-semibold text-amber-900">This import may be stuck.</p>
+                    <p className="mt-1 text-sm text-amber-800">
+                      If the counts are not moving after about 20 seconds, try disconnecting and starting the import again.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 
