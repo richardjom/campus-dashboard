@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { AlertTriangle, FileUp, RotateCcw, Send, Upload } from "lucide-react";
+import { AlertTriangle, CheckCircle2, FileUp, RotateCcw, Send, Upload } from "lucide-react";
 import { useSundayMetrics } from "../hooks/use-sunday-metrics";
 import { mergeSundayMetrics, parseSundayMetricsCsv, saveImportedMetrics, type SundayMetric } from "../lib/sunday-metrics";
 
@@ -91,6 +91,7 @@ export function EntryPage() {
   const [anomalyType, setAnomalyType] = useState<(typeof anomalyTypes)[number]>("Power outage");
   const [anomalyNoService, setAnomalyNoService] = useState(true);
   const [anomalyNote, setAnomalyNote] = useState("");
+  const [anomalySavedNotice, setAnomalySavedNotice] = useState(false);
   const [message, setMessage] = useState("Enter a campus Sunday manually or upload a CSV to merge new service data into the current dataset.");
   const [error, setError] = useState("");
 
@@ -105,6 +106,18 @@ export function EntryPage() {
       setAnomalyCampus(campusOptions[0]);
     }
   }, [anomalyCampus, campusOptions]);
+
+  useEffect(() => {
+    if (!anomalySavedNotice) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setAnomalySavedNotice(false);
+    }, 2500);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [anomalySavedNotice]);
 
   const totals = useMemo(() => {
     return serviceTimes.reduce(
@@ -229,6 +242,7 @@ export function EntryPage() {
     const merged = mergeSundayMetrics(metrics, [record]);
     saveImportedMetrics(merged);
     setError("");
+    setAnomalySavedNotice(true);
     setMessage(
       `Saved a ${anomalyType.toLowerCase()} context note for ${anomalyCampus} on ${anomalyDate}. Reports will use it to explain unusual movement without adding fake metric totals.`,
     );
@@ -480,14 +494,24 @@ export function EntryPage() {
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={submitAnomalyNote}
-            className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-[#111827] px-5 text-sm font-semibold text-white transition hover:bg-black"
-          >
-            <Send className="h-4 w-4" />
-            Save context note
-          </button>
+          <div className="flex flex-col items-start gap-3 sm:items-end">
+            <button
+              type="button"
+              onClick={submitAnomalyNote}
+              className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-[#111827] px-5 text-sm font-semibold text-white transition hover:bg-black"
+            >
+              <Send className="h-4 w-4" />
+              Save context note
+            </button>
+            <div className="min-h-5">
+              {anomalySavedNotice && (
+                <p className="inline-flex items-center gap-2 text-sm font-semibold text-emerald-700">
+                  <CheckCircle2 className="h-4 w-4" />
+                  Noted
+                </p>
+              )}
+            </div>
+          </div>
         </div>
 
         <div className="mt-6 grid gap-4 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
