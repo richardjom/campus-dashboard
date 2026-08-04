@@ -77,11 +77,15 @@ The import workflow lives in `/records`. Imported data is stored in browser `loc
 The Settings page supports Planning Center people import using a Personal Access Token client ID and secret.
 
 - The frontend posts to `/api/planning-center/test` and `/api/planning-center/people`
-- Those endpoints are handled locally inside the Vite config middleware
-- No separate proxy process is required for local development
+- Those endpoints now exist both in local development and in deployed hosting
+- Local development still uses the Vite middleware bridge, with no separate proxy process required
+- Production hosting uses deployed API routes so the public site can reach Planning Center too
 
 Files involved:
 
+- [`api/planning-center/test.ts`](./api/planning-center/test.ts)
+- [`api/planning-center/people.ts`](./api/planning-center/people.ts)
+- [`server/planning-center-http.ts`](./server/planning-center-http.ts)
 - [`vite.config.ts`](./vite.config.ts)
 - [`server/planning-center-proxy.ts`](./server/planning-center-proxy.ts)
 - [`src/lib/planning-center.ts`](./src/lib/planning-center.ts)

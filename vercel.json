@@ -1,0 +1,11 @@
+{
+  "rewrites": [
+    { "source": "/dashboard", "destination": "/index.html" },
+    { "source": "/entry", "destination": "/index.html" },
+    { "source": "/people", "destination": "/index.html" },
+    { "source": "/pipeline", "destination": "/index.html" },
+    { "source": "/records", "destination": "/index.html" },
+    { "source": "/insights", "destination": "/index.html" },
+    { "source": "/settings", "destination": "/index.html" }
+  ]
+}
