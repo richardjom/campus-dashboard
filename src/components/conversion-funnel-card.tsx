@@ -12,14 +12,24 @@ type ConversionFunnelCardProps = {
 
 type ConversionRow = {
   campus: string;
+  attendance: number;
   firstTimeGuests: number;
   growthTrack: number;
   baptism: number;
   salvations: number;
   guestToGrowthTrack: number | null;
+  growthTrackActivity: number | null;
   guestToBaptism: number | null;
   salvationToBaptism: number | null;
   note: string;
+};
+
+type PathwayMetricPresentation = {
+  label: string;
+  value: number | null;
+  detail: string;
+  tone: "positive" | "warning" | "neutral";
+  mode: "cohort" | "activity" | "none";
 };
 
 export function ConversionFunnelCard({
@@ -31,6 +41,10 @@ export function ConversionFunnelCard({
 }: ConversionFunnelCardProps) {
   const rows = useMemo(() => buildConversionRows(metrics, campuses, year), [metrics, campuses, year]);
   const totals = useMemo(() => summarizeRows(rows), [rows]);
+  const primaryPathwayMetric = useMemo(
+    () => buildPathwayMetricPresentation(totals.attendance, totals.firstTimeGuests, totals.growthTrack),
+    [totals.attendance, totals.firstTimeGuests, totals.growthTrack],
+  );
 
   if (rows.length === 0) {
     return (
@@ -68,10 +82,10 @@ export function ConversionFunnelCard({
 
       <div className="mt-5 grid gap-3 md:grid-cols-3">
         <ConversionStat
-          label="FTG -> Growth Track"
-          value={formatRate(totals.guestToGrowthTrack)}
-          detail={`${totals.growthTrack.toLocaleString()} Growth Track / ${totals.firstTimeGuests.toLocaleString()} FTG`}
-          tone={getRateTone(totals.guestToGrowthTrack, totals.growthTrack > totals.firstTimeGuests)}
+          label={primaryPathwayMetric.label}
+          value={formatRate(primaryPathwayMetric.value)}
+          detail={primaryPathwayMetric.detail}
+          tone={primaryPathwayMetric.tone}
         />
         <ConversionStat
           label="FTG -> Baptism"
@@ -92,28 +106,33 @@ export function ConversionFunnelCard({
           <span>Campus</span>
           <span>FTG</span>
           <span>Growth Track</span>
-          <span>{"FTG -> GT"}</span>
+          <span>Pathway rate</span>
           <span>Baptism</span>
           <span>Read</span>
         </div>
 
-        {rows.map((row) => (
-          <div
-            key={row.campus}
-            className="grid min-w-[920px] grid-cols-[1.1fr_0.8fr_0.8fr_0.8fr_0.8fr_1.4fr] items-center border-b border-gray-100 px-4 py-4 text-sm last:border-b-0 hover:bg-[#fbfbfc]"
-          >
-            <span className="font-semibold text-slate-950">{row.campus}</span>
-            <span className="text-slate-700">{row.firstTimeGuests.toLocaleString()}</span>
-            <span className="text-slate-700">{row.growthTrack.toLocaleString()}</span>
-            <span>
-              <span className={getRateBadgeClass(row.guestToGrowthTrack, row.growthTrack > row.firstTimeGuests)}>
-                {formatRate(row.guestToGrowthTrack)}
+        {rows.map((row) => {
+          const pathwayMetric = buildPathwayMetricPresentation(row.attendance, row.firstTimeGuests, row.growthTrack);
+
+          return (
+            <div
+              key={row.campus}
+              className="grid min-w-[920px] grid-cols-[1.1fr_0.8fr_0.8fr_0.8fr_0.8fr_1.4fr] items-center border-b border-gray-100 px-4 py-4 text-sm last:border-b-0 hover:bg-[#fbfbfc]"
+            >
+              <span className="font-semibold text-slate-950">{row.campus}</span>
+              <span className="text-slate-700">{row.firstTimeGuests.toLocaleString()}</span>
+              <span className="text-slate-700">{row.growthTrack.toLocaleString()}</span>
+              <span className="space-y-1">
+                <span className={getPathwayBadgeClass(pathwayMetric)}>
+                  {formatRate(pathwayMetric.value)}
+                </span>
+                <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-gray-400">{pathwayMetric.mode === "cohort" ? "cohort" : pathwayMetric.mode === "activity" ? "activity" : "n/a"}</p>
               </span>
-            </span>
-            <span className="text-slate-700">{row.baptism.toLocaleString()}</span>
-            <span className="text-xs leading-5 text-gray-600">{row.note}</span>
-          </div>
-        ))}
+              <span className="text-slate-700">{row.baptism.toLocaleString()}</span>
+              <span className="text-xs leading-5 text-gray-600">{row.note}</span>
+            </div>
+          );
+        })}
       </div>
 
       <p className="mt-4 text-xs leading-5 text-gray-500">
@@ -140,21 +159,25 @@ function buildConversionRows(metrics: SundayMetric[], campuses?: string[], year?
   return campusScope
     .map((campus) => {
       const campusRecords = scopedMetrics.filter((metric) => metric.campus === campus);
+      const attendance = sumMetric(campusRecords, "attendance");
       const firstTimeGuests = sumMetric(campusRecords, "first_time_guests");
       const growthTrack = sumMetric(campusRecords, "growth_track");
       const baptism = sumMetric(campusRecords, "baptism");
       const salvations = sumMetric(campusRecords, "salvations");
       const guestToGrowthTrack = ratio(growthTrack, firstTimeGuests);
+      const growthTrackActivity = ratio(growthTrack, attendance);
       const guestToBaptism = ratio(baptism, firstTimeGuests);
       const salvationToBaptism = ratio(baptism, salvations);
 
       return {
         campus,
+        attendance,
         firstTimeGuests,
         growthTrack,
         baptism,
         salvations,
         guestToGrowthTrack,
+        growthTrackActivity,
         guestToBaptism,
         salvationToBaptism,
         note: buildConversionNote(firstTimeGuests, growthTrack, guestToGrowthTrack),
@@ -166,6 +189,7 @@ function buildConversionRows(metrics: SundayMetric[], campuses?: string[], year?
 function summarizeRows(rows: ConversionRow[]): Omit<ConversionRow, "campus" | "note"> {
   const totals = rows.reduce(
     (accumulator, row) => {
+      accumulator.attendance += row.attendance;
       accumulator.firstTimeGuests += row.firstTimeGuests;
       accumulator.growthTrack += row.growthTrack;
       accumulator.baptism += row.baptism;
@@ -173,6 +197,7 @@ function summarizeRows(rows: ConversionRow[]): Omit<ConversionRow, "campus" | "n
       return accumulator;
     },
     {
+      attendance: 0,
       firstTimeGuests: 0,
       growthTrack: 0,
       baptism: 0,
@@ -183,6 +208,7 @@ function summarizeRows(rows: ConversionRow[]): Omit<ConversionRow, "campus" | "n
   return {
     ...totals,
     guestToGrowthTrack: ratio(totals.growthTrack, totals.firstTimeGuests),
+    growthTrackActivity: ratio(totals.growthTrack, totals.attendance),
     guestToBaptism: ratio(totals.baptism, totals.firstTimeGuests),
     salvationToBaptism: ratio(totals.baptism, totals.salvations),
   };
@@ -221,6 +247,31 @@ function buildConversionNote(firstTimeGuests: number, growthTrack: number, guest
   return "Directional movement is present; cohort follow-up data would sharpen the read.";
 }
 
+function buildPathwayMetricPresentation(attendance: number, firstTimeGuests: number, growthTrack: number): PathwayMetricPresentation {
+  if (firstTimeGuests > 0 && growthTrack <= firstTimeGuests) {
+    const value = ratio(growthTrack, firstTimeGuests);
+    return {
+      label: "FTG -> Growth Track",
+      value,
+      detail: `${growthTrack.toLocaleString()} Growth Track / ${firstTimeGuests.toLocaleString()} FTG`,
+      tone: getRateTone(value, false),
+      mode: "cohort",
+    };
+  }
+
+  const activityRate = ratio(growthTrack, attendance);
+  return {
+    label: "Growth Track activity",
+    value: activityRate,
+    detail:
+      attendance > 0
+        ? `${growthTrack.toLocaleString()} Growth Track / ${attendance.toLocaleString()} attendance`
+        : `${growthTrack.toLocaleString()} Growth Track activity logged`,
+    tone: "neutral",
+    mode: growthTrack > 0 ? "activity" : "none",
+  };
+}
+
 function formatRate(value: number | null) {
   if (value === null || Number.isNaN(value)) return "N/A";
   return `${Math.round(value * 100)}%`;
@@ -241,6 +292,14 @@ function getRateBadgeClass(value: number | null, overBaseline: boolean) {
   if (tone === "positive") return `${base} bg-emerald-100 text-emerald-700`;
   if (tone === "warning") return `${base} bg-amber-100 text-amber-700`;
   return `${base} bg-gray-100 text-slate-700`;
+}
+
+function getPathwayBadgeClass(presentation: PathwayMetricPresentation) {
+  if (presentation.mode === "activity") {
+    return "inline-flex rounded-full bg-sky-100 px-3 py-1 text-xs font-semibold text-sky-700";
+  }
+
+  return getRateBadgeClass(presentation.value, false);
 }
 
 function ConversionStat({
