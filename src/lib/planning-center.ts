@@ -93,7 +93,7 @@ export async function testPcoConnection(credentials: PcoCredentials): Promise<{ 
     if (res.status === 401) return { ok: false, error: payload.error ?? "Invalid credentials." };
     return { ok: false, error: payload.error ?? `API returned ${res.status}.` };
   } catch {
-    return { ok: false, error: "Could not reach the local Planning Center proxy. Make sure the app is running locally." };
+    return { ok: false, error: "Could not reach the Planning Center connection service. Refresh the page and try again." };
   }
 }
 
