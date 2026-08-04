@@ -39,13 +39,12 @@ export function DashboardPage() {
   const ytdSummary = useMemo(() => deriveYtdSummary(metrics), [metrics]);
   const campusSnapshots = useMemo(() => deriveCampusSnapshotsFromMetrics(metrics), [metrics]);
   const bigEventOverview = useMemo(() => getBigEventOverview(bigEventRecords, metrics), [bigEventRecords, metrics]);
-  const initialComparisonPeriods = availableYears.length > 1 ? [{ year: availableYears.at(-2) ?? availableYears[0] ?? "2025" }] : [];
   const [filters, setFilters] = useState<ComparisonFilters>({
     selectedCampuses: availableCampuses.slice(0, Math.min(2, availableCampuses.length)),
     metric: "attendance",
     periodA: { year: availableYears.at(-1) ?? "2026" },
-    comparisonPeriods: initialComparisonPeriods,
-    periodB: initialComparisonPeriods[0],
+    comparisonPeriods: [],
+    periodB: undefined,
   });
 
   useEffect(() => {
