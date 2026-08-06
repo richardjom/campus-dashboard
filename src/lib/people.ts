@@ -182,7 +182,7 @@ export async function importPcopeople(rawPeople: PcoRawPerson[]): Promise<Person
       lastName: raw.lastName,
       email: raw.email,
       phone: raw.phone,
-      campus: "",
+      campus: raw.campusName,
       journeyStage: existing?.journeyStage ?? deriveJourneyStage(raw.membership),
       source: "pco" as const,
       pcoMembership: raw.membership,

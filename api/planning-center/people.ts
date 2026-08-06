@@ -39,6 +39,14 @@ type PcoApiPhone = {
   attributes: { number: string; primary: boolean };
 };
 
+type PcoApiCampus = {
+  type: "Campus";
+  id: string;
+  attributes: {
+    name: string;
+  };
+};
+
 type PcoRawPerson = {
   id: string;
   firstName: string;
@@ -50,6 +58,7 @@ type PcoRawPerson = {
   createdAt: string;
   updatedAt: string;
   primaryCampusId: string | null;
+  campusName: string;
   gender: string;
   birthdate: string | null;
 };
@@ -121,6 +130,7 @@ function authHeader(credentials: ProxyPcoCredentials) {
 
 async function fetchPcoPeoplePage(request: PeopleRequestBody) {
   const response = await fetchPcoPage(resolvePageUrl(request.pageUrl), request);
+  const campusNamesById = await fetchCampusNames(request);
 
   const json = (await response.json()) as {
     data: PcoApiPerson[];
@@ -157,6 +167,9 @@ async function fetchPcoPeoplePage(request: PeopleRequestBody) {
       createdAt: person.attributes.created_at,
       updatedAt: person.attributes.updated_at,
       primaryCampusId: person.attributes.primary_campus_id ?? null,
+      campusName: person.attributes.primary_campus_id
+        ? (campusNamesById.get(person.attributes.primary_campus_id) ?? "")
+        : "",
       gender: person.attributes.gender ?? "",
       birthdate: person.attributes.birthdate ?? null,
     };
@@ -168,6 +181,20 @@ async function fetchPcoPeoplePage(request: PeopleRequestBody) {
     count: typeof json.meta?.count === "number" ? json.meta.count : people.length,
     nextPageUrl: json.links.next ?? null,
   };
+}
+
+async function fetchCampusNames(credentials: ProxyPcoCredentials) {
+  const response = await fetchPcoPage(`${PCO_BASE}/people/v2/campuses?per_page=100`, credentials);
+  const json = (await response.json()) as {
+    data?: PcoApiCampus[];
+  };
+
+  const campusNamesById = new Map<string, string>();
+  for (const campus of json.data ?? []) {
+    campusNamesById.set(campus.id, campus.attributes.name ?? "");
+  }
+
+  return campusNamesById;
 }
 
 function resolvePageUrl(pageUrl?: string) {

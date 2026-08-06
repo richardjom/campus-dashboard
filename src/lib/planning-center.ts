@@ -17,6 +17,7 @@ export type PcoRawPerson = {
   createdAt: string;
   updatedAt: string;
   primaryCampusId: string | null;
+  campusName: string;
   gender: string;
   birthdate: string | null;
 };
