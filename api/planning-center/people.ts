@@ -87,43 +87,16 @@ export default async function handler(
       return;
     }
 
-    if (typeof res.write === "function") {
-      beginNdjsonStream(res);
-      writeNdjson(res, {
-        type: "progress",
-        loaded: 0,
-        total: null,
-        page: 0,
-        pageCount: null,
-        message: "Connected to Planning Center. Loading first page…",
-      });
-
-      const result = await fetchPcoPeople(credentials, (progress) => {
-        writeNdjson(res, { type: "progress", ...progress });
-      });
-
-      writeNdjson(res, {
-        type: "done",
-        data: result.people,
-        loaded: result.people.length,
-        total: result.total,
-        page: result.pageCount,
-        pageCount: result.pageCount,
-        message: "Import complete.",
-      });
-      res.end("");
-      return;
-    }
-
     const result = await fetchPcoPeople(credentials);
-    sendJson(res, 200, { data: result.people });
+    sendJson(res, 200, {
+      data: result.people,
+      meta: {
+        total: result.total,
+        pageCount: result.pageCount,
+      },
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected proxy error.";
-    if (typeof res.write === "function") {
-      writeNdjson(res, { type: "error", error: message });
-      res.end("");
-      return;
-    }
     sendJson(res, 500, { error: message });
   }
 }
@@ -290,24 +263,4 @@ function sendJson(
   res.statusCode = statusCode;
   res.setHeader?.("Content-Type", "application/json");
   res.end(JSON.stringify(payload));
-}
-
-function beginNdjsonStream(res: {
-  statusCode?: number;
-  setHeader?: (name: string, value: string) => void;
-  flushHeaders?: () => void;
-}) {
-  res.statusCode = 200;
-  res.setHeader?.("Content-Type", "application/x-ndjson; charset=utf-8");
-  res.setHeader?.("Cache-Control", "no-store");
-  res.flushHeaders?.();
-}
-
-function writeNdjson(
-  res: {
-    write?: (chunk: string) => void;
-  },
-  payload: unknown,
-) {
-  res.write?.(`${JSON.stringify(payload)}\n`);
 }

@@ -101,6 +101,14 @@ export async function fetchPcoPeople(
   credentials: PcoCredentials,
   onProgress?: (progress: PcoImportProgress) => void,
 ): Promise<PcoRawPerson[]> {
+  onProgress?.({
+    loaded: 0,
+    total: null,
+    page: 0,
+    pageCount: null,
+    message: "Request sent to Planning Center. Waiting for the directory export…",
+  });
+
   const res = await fetch("/api/planning-center/people", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -112,72 +120,13 @@ export async function fetchPcoPeople(
     throw new Error(payload.error ?? `Planning Center proxy error: ${res.status}`);
   }
 
-  const contentType = res.headers.get("Content-Type") ?? "";
-  if (!res.body || !contentType.includes("application/x-ndjson")) {
-    const payload = await res.json() as { data: PcoRawPerson[] };
-    const people = payload.data ?? [];
-    onProgress?.({
-      loaded: people.length,
-      total: people.length,
-      page: 1,
-      pageCount: 1,
-      message: "Import complete.",
-    });
-    return people;
-  }
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let people: PcoRawPerson[] | null = null;
-
-  while (true) {
-    const { done, value } = await reader.read();
-    buffer += decoder.decode(value, { stream: !done });
-
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      const event = JSON.parse(line) as
-        | ({ type: "progress" } & PcoImportProgress)
-        | ({ type: "done"; data: PcoRawPerson[] } & PcoImportProgress)
-        | { type: "error"; error: string };
-
-      if (event.type === "error") {
-        throw new Error(event.error);
-      }
-
-      if (event.type === "progress") {
-        onProgress?.(event);
-      }
-
-      if (event.type === "done") {
-        people = event.data;
-        onProgress?.(event);
-      }
-    }
-
-    if (done) break;
-  }
-
-  if (buffer.trim()) {
-    const event = JSON.parse(buffer) as
-      | ({ type: "done"; data: PcoRawPerson[] } & PcoImportProgress)
-      | { type: "error"; error: string };
-
-    if (event.type === "error") {
-      throw new Error(event.error);
-    }
-
-    people = event.data;
-    onProgress?.(event);
-  }
-
-  if (!people) {
-    throw new Error("Planning Center import ended before any results were returned.");
-  }
-
+  const payload = await res.json() as {
+    data?: PcoRawPerson[];
+    meta?: {
+      total?: number;
+      pageCount?: number;
+    };
+  };
+  const people = payload.data ?? [];
   return people;
 }
