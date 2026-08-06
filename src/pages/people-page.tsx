@@ -77,6 +77,19 @@ export function PeoplePage() {
       a.localeCompare(b),
     );
   }, [people]);
+  const unassignedCampusCount = useMemo(
+    () => people.filter((person) => !person.campus.trim()).length,
+    [people],
+  );
+  const campusCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const person of people) {
+      const campus = person.campus.trim();
+      if (!campus) continue;
+      counts.set(campus, (counts.get(campus) ?? 0) + 1);
+    }
+    return counts;
+  }, [people]);
 
   const funnel = useMemo(() => buildJourneyFunnel(people), [people]);
   const maxCount = Math.max(...funnel.map((row) => row.count), 1);
@@ -162,6 +175,19 @@ export function PeoplePage() {
     counts.inactive += counts.archived;
     return counts;
   }, [people]);
+
+  const hasActiveFilters =
+    activeStage !== "all" ||
+    directoryFilter !== "active" ||
+    campusFilter !== "all" ||
+    search.trim().length > 0;
+
+  const clearAllFilters = () => {
+    setActiveStage("all");
+    setDirectoryFilter("active");
+    setCampusFilter("all");
+    setSearch("");
+  };
 
   return (
     <div className="space-y-6 lg:space-y-8">
@@ -293,69 +319,86 @@ export function PeoplePage() {
           </div>
         </div>
 
-        <div className="flex flex-col gap-3 border-b border-gray-100 py-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap gap-2">
-            <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-slate-600">
-              Campus
-            </span>
-            <select
-              value={campusFilter}
-              onChange={(e) => setCampusFilter(e.target.value)}
-              className="h-10 rounded-2xl border border-gray-200 bg-white px-3 text-sm font-medium text-slate-900 outline-none transition hover:border-gray-300 focus:border-slate-900"
-            >
-              <option value="all">All campuses ({people.length})</option>
-              {campusOptions.map((campus) => {
-                const count = people.filter((person) => person.campus.trim() === campus).length;
-                return (
-                  <option key={campus} value={campus}>
-                    {campus} ({count})
-                  </option>
-                );
-              })}
-              <option value="Unassigned">
-                Unassigned ({people.filter((person) => !person.campus.trim()).length})
-              </option>
-            </select>
+        <div className="space-y-4 border-b border-gray-100 py-4">
+          <div className="flex items-center justify-between gap-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Filters</p>
+            {hasActiveFilters && (
+              <button
+                onClick={clearAllFilters}
+                className="text-sm font-semibold text-[#2563eb] transition hover:underline"
+              >
+                Clear all filters
+              </button>
+            )}
           </div>
-          <p className="text-sm text-gray-500">
-            {campusFilter === "all" ? "Viewing every campus" : `Campus filter: ${campusFilter}`}
-          </p>
-        </div>
 
-        <div className="mt-2 flex flex-wrap gap-2 py-4">
-          <StageTab label="All" active={activeStage === "all"} onClick={() => setActiveStage("all")} />
-          {allStages.map((stage) => (
-            <StageTab
-              key={stage}
-              label={stageLabels[stage]}
-              active={activeStage === stage}
-              onClick={() => setActiveStage(activeStage === stage ? "all" : stage)}
-              color={stageColors[stage].dot}
-            />
-          ))}
-        </div>
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Campus</p>
+              <div className="flex flex-wrap gap-2">
+                <FilterPill
+                  label={`All campuses (${people.length})`}
+                  active={campusFilter === "all"}
+                  onClick={() => setCampusFilter("all")}
+                />
+                {campusOptions.map((campus) => (
+                  <FilterPill
+                    key={campus}
+                    label={`${campus} (${campusCounts.get(campus) ?? 0})`}
+                    active={campusFilter === campus}
+                    onClick={() => setCampusFilter(campusFilter === campus ? "all" : campus)}
+                  />
+                ))}
+                <FilterPill
+                  label={`Unassigned (${unassignedCampusCount})`}
+                  active={campusFilter === "Unassigned"}
+                  onClick={() => setCampusFilter(campusFilter === "Unassigned" ? "all" : "Unassigned")}
+                />
+              </div>
+            </div>
 
-        <div className="flex flex-wrap gap-2 border-t border-gray-100 py-4">
-          <DirectoryTab
-            label={`Active (${directoryCounts.active})`}
-            active={directoryFilter === "active"}
-            onClick={() => setDirectoryFilter("active")}
-          />
-          <DirectoryTab
-            label={`Inactive (${directoryCounts.inactive})`}
-            active={directoryFilter === "inactive"}
-            onClick={() => setDirectoryFilter("inactive")}
-          />
-          <DirectoryTab
-            label={`Stale inactive ${STALE_INACTIVE_DAYS}+d (${directoryCounts.staleInactive})`}
-            active={directoryFilter === "staleInactive"}
-            onClick={() => setDirectoryFilter("staleInactive")}
-          />
-          <DirectoryTab
-            label={`All statuses (${people.length})`}
-            active={directoryFilter === "all"}
-            onClick={() => setDirectoryFilter("all")}
-          />
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Process Stage</p>
+              <div className="flex flex-wrap gap-2">
+                <StageTab label="All" active={activeStage === "all"} onClick={() => setActiveStage("all")} />
+                {allStages.map((stage) => (
+                  <StageTab
+                    key={stage}
+                    label={stageLabels[stage]}
+                    active={activeStage === stage}
+                    onClick={() => setActiveStage(activeStage === stage ? "all" : stage)}
+                    color={stageColors[stage].dot}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Directory Status</p>
+              <div className="flex flex-wrap gap-2">
+                <DirectoryTab
+                  label={`Active (${directoryCounts.active})`}
+                  active={directoryFilter === "active"}
+                  onClick={() => setDirectoryFilter("active")}
+                />
+                <DirectoryTab
+                  label={`Inactive (${directoryCounts.inactive})`}
+                  active={directoryFilter === "inactive"}
+                  onClick={() => setDirectoryFilter("inactive")}
+                />
+                <DirectoryTab
+                  label={`Stale inactive ${STALE_INACTIVE_DAYS}+d (${directoryCounts.staleInactive})`}
+                  active={directoryFilter === "staleInactive"}
+                  onClick={() => setDirectoryFilter("staleInactive")}
+                />
+                <DirectoryTab
+                  label={`All statuses (${people.length})`}
+                  active={directoryFilter === "all"}
+                  onClick={() => setDirectoryFilter("all")}
+                />
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="flex flex-col gap-3 border-y border-gray-100 py-4 sm:flex-row sm:items-center sm:justify-between">
@@ -583,6 +626,30 @@ function StageTab({
       ].join(" ")}
     >
       {color && <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />}
+      {label}
+    </button>
+  );
+}
+
+function FilterPill({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={[
+        "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition",
+        active
+          ? "border-slate-900 bg-slate-900 text-white"
+          : "border-gray-200 bg-white text-slate-700 hover:bg-gray-50",
+      ].join(" ")}
+    >
       {label}
     </button>
   );
