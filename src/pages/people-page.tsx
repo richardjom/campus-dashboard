@@ -6,6 +6,7 @@ import {
   getMockPeople,
   buildJourneyFunnel,
   savePeople,
+  daysSince,
   isStrictlyInactive,
   STALE_INACTIVE_DAYS,
   getPersonActivityDate,
@@ -34,6 +35,7 @@ const stageLabels: Record<JourneyStage, string> = {
 };
 
 const allStages: JourneyStage[] = ["firstTimeGuest", "returningGuest", "growthTrack", "teamMember", "teamLeader"];
+type VolunteerWatchState = "healthy" | "drifting" | "fading" | "inactive";
 
 export function PeoplePage() {
   const [people, setPeople] = useState<Person[]>([]);
@@ -93,6 +95,33 @@ export function PeoplePage() {
 
   const funnel = useMemo(() => buildJourneyFunnel(people), [people]);
   const maxCount = Math.max(...funnel.map((row) => row.count), 1);
+  const teamPeople = useMemo(
+    () => people.filter((person) => person.journeyStage === "teamMember" || person.journeyStage === "teamLeader"),
+    [people],
+  );
+  const importedPeopleCount = useMemo(() => people.filter((person) => person.source === "pco").length, [people]);
+  const teamSignalLikelyMissing = source === "real" && importedPeopleCount > 0 && teamPeople.length === 0;
+  const volunteerWatchRows = useMemo(
+    () =>
+      teamPeople
+        .map((person) => ({
+          person,
+          state: getVolunteerWatchState(person),
+          days: daysSince(getPersonActivityDate(person)),
+        }))
+        .sort((left, right) => right.days - left.days),
+    [teamPeople],
+  );
+  const volunteerWatchCounts = useMemo(() => {
+    const counts: Record<VolunteerWatchState, number> = {
+      healthy: 0,
+      drifting: 0,
+      fading: 0,
+      inactive: 0,
+    };
+    for (const row of volunteerWatchRows) counts[row.state] += 1;
+    return counts;
+  }, [volunteerWatchRows]);
 
   const filtered = useMemo(() => {
     return people.filter((person) => {
@@ -296,6 +325,81 @@ export function PeoplePage() {
             </button>
           )}
         </div>
+      </section>
+
+      <section className="rounded-[30px] border border-gray-200 bg-white p-6 lg:p-7">
+        <div className="flex flex-col gap-4 border-b border-gray-200 pb-5 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Volunteer watch</p>
+            <h2 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-950">Serving pipeline health</h2>
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-gray-600">
+              This section is meant to show who is serving steadily, who is starting to drift, and who looks like they
+              may be fading out. Right now it uses profile activity as a proxy until Planning Center Services serving
+              data is connected.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <WatchStat label="Healthy" count={volunteerWatchCounts.healthy} tone="healthy" />
+            <WatchStat label="Drifting" count={volunteerWatchCounts.drifting} tone="drifting" />
+            <WatchStat label="Fading" count={volunteerWatchCounts.fading} tone="fading" />
+            <WatchStat label="Inactive" count={volunteerWatchCounts.inactive} tone="inactive" />
+          </div>
+        </div>
+
+        {teamSignalLikelyMissing && (
+          <div className="mt-5 rounded-[22px] border border-amber-200 bg-amber-50 p-4">
+            <p className="text-sm font-semibold text-amber-900">Why `On A Team` is likely showing 0</p>
+            <p className="mt-2 text-sm leading-6 text-amber-800">
+              The current Planning Center import reads the People directory and People custom fields. It does not yet
+              read Planning Center Services team assignments, schedules, or serving history. So if your volunteers are
+              tracked mainly in Services instead of the People profile, they will not automatically land in `On A Team`
+              yet.
+            </p>
+          </div>
+        )}
+
+        {volunteerWatchRows.length > 0 ? (
+          <div className="mt-5 overflow-x-auto rounded-[24px] border border-gray-200">
+            <div className="grid min-w-[900px] grid-cols-[1.1fr_0.9fr_0.8fr_0.8fr_1.2fr] border-b border-gray-200 bg-[#fbfbfc] px-4 py-3 text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">
+              <span>Person</span>
+              <span>Campus</span>
+              <span>Serving stage</span>
+              <span>Watch state</span>
+              <span>Last activity</span>
+            </div>
+            {volunteerWatchRows.map(({ person, state, days }) => (
+              <div
+                key={`watch-${person.id}`}
+                className="grid min-w-[900px] grid-cols-[1.1fr_0.9fr_0.8fr_0.8fr_1.2fr] items-center border-b border-gray-100 px-4 py-4 text-sm last:border-b-0"
+              >
+                <div>
+                  <p className="font-semibold text-slate-950">
+                    {person.firstName} {person.lastName}
+                  </p>
+                  <p className="text-xs text-gray-500">{person.email || "No email on file"}</p>
+                </div>
+                <span className="text-slate-700">{person.campus || "Unassigned"}</span>
+                <span className="text-slate-700">{stageLabels[person.journeyStage]}</span>
+                <span className={watchBadgeClass(state)}>{watchStateLabel(state)}</span>
+                <div>
+                  <p className="text-slate-700">{formatRelativeActivity(getPersonActivityDate(person))}</p>
+                  <p className="text-xs text-gray-500">
+                    {Number.isFinite(days) ? `${days} days since activity` : "No activity date on file"}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="mt-5 rounded-[22px] border border-gray-200 bg-[#fbfbfc] p-5">
+            <p className="text-sm font-semibold text-slate-950">No serving records are being classified yet.</p>
+            <p className="mt-2 text-sm leading-6 text-gray-600">
+              Once volunteers are actually landing in `On A Team` or `Team Leader`, this watchlist will show who looks
+              steady, who is drifting, and who needs follow-up. The missing piece is stronger serving signals from
+              Planning Center than the People directory alone provides.
+            </p>
+          </div>
+        )}
       </section>
 
       {/* People list */}
@@ -605,6 +709,67 @@ function formatRelativeActivity(dateStr: string | undefined) {
     day: "numeric",
     year: "numeric",
   }).format(date);
+}
+
+function getVolunteerWatchState(person: Person): VolunteerWatchState {
+  const status = person.directoryStatus ?? "active";
+  if (status === "archived" || status === "inactive") return "inactive";
+
+  const days = daysSince(getPersonActivityDate(person));
+  if (!Number.isFinite(days) || days <= 30) return "healthy";
+  if (days <= 60) return "drifting";
+  if (days <= 120) return "fading";
+  return "inactive";
+}
+
+function watchStateLabel(state: VolunteerWatchState) {
+  switch (state) {
+    case "healthy":
+      return "Healthy";
+    case "drifting":
+      return "Drifting";
+    case "fading":
+      return "Fading";
+    case "inactive":
+      return "Inactive";
+  }
+}
+
+function watchBadgeClass(state: VolunteerWatchState) {
+  switch (state) {
+    case "healthy":
+      return "inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700";
+    case "drifting":
+      return "inline-flex rounded-full bg-sky-100 px-3 py-1 text-xs font-semibold text-sky-700";
+    case "fading":
+      return "inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700";
+    case "inactive":
+      return "inline-flex rounded-full bg-rose-100 px-3 py-1 text-xs font-semibold text-rose-700";
+  }
+}
+
+function WatchStat({
+  label,
+  count,
+  tone,
+}: {
+  label: string;
+  count: number;
+  tone: VolunteerWatchState;
+}) {
+  const toneClasses: Record<VolunteerWatchState, string> = {
+    healthy: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    drifting: "border-sky-200 bg-sky-50 text-sky-700",
+    fading: "border-amber-200 bg-amber-50 text-amber-700",
+    inactive: "border-rose-200 bg-rose-50 text-rose-700",
+  };
+
+  return (
+    <div className={["rounded-[20px] border px-4 py-3", toneClasses[tone]].join(" ")}>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.16em]">{label}</p>
+      <p className="mt-2 text-2xl font-semibold tracking-[-0.05em]">{count}</p>
+    </div>
+  );
 }
 
 function StageTab({
