@@ -101,32 +101,69 @@ export async function fetchPcoPeople(
   credentials: PcoCredentials,
   onProgress?: (progress: PcoImportProgress) => void,
 ): Promise<PcoRawPerson[]> {
+  const allPeople: PcoRawPerson[] = [];
+  let page = 0;
+  let total: number | null = null;
+  let nextPageUrl: string | null | undefined;
+
   onProgress?.({
     loaded: 0,
     total: null,
     page: 0,
     pageCount: null,
-    message: "Request sent to Planning Center. Waiting for the directory export…",
+    message: "Connecting to Planning Center…",
   });
 
-  const res = await fetch("/api/planning-center/people", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(credentials),
-  });
+  do {
+    page += 1;
 
-  if (!res.ok) {
-    const payload = await res.json().catch(() => ({ error: `Planning Center proxy error: ${res.status}` })) as { error?: string };
-    throw new Error(payload.error ?? `Planning Center proxy error: ${res.status}`);
-  }
+    onProgress?.({
+      loaded: allPeople.length,
+      total,
+      page: Math.max(1, page),
+      pageCount: total && total > 0 ? Math.ceil(total / 100) : null,
+      message: page === 1 ? "Loading first Planning Center page…" : `Loading page ${page} from Planning Center…`,
+    });
 
-  const payload = await res.json() as {
-    data?: PcoRawPerson[];
-    meta?: {
-      total?: number;
-      pageCount?: number;
+    const res = await fetch("/api/planning-center/people", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...credentials,
+        pageUrl: nextPageUrl ?? undefined,
+      }),
+    });
+
+    if (!res.ok) {
+      const payload = await res.json().catch(() => ({ error: `Planning Center proxy error: ${res.status}` })) as { error?: string };
+      throw new Error(payload.error ?? `Planning Center proxy error: ${res.status}`);
+    }
+
+    const payload = await res.json() as {
+      data?: PcoRawPerson[];
+      meta?: {
+        total?: number;
+        count?: number;
+        nextPageUrl?: string | null;
+      };
     };
-  };
-  const people = payload.data ?? [];
-  return people;
+
+    const people = payload.data ?? [];
+    total = typeof payload.meta?.total === "number" ? payload.meta.total : total;
+    nextPageUrl = payload.meta?.nextPageUrl ?? null;
+    allPeople.push(...people);
+
+    const pageCount = total && total > 0 ? Math.ceil(total / 100) : null;
+    onProgress?.({
+      loaded: allPeople.length,
+      total,
+      page,
+      pageCount,
+      message: nextPageUrl
+        ? `Loaded page ${page}${pageCount ? ` of ${pageCount}` : ""} from Planning Center…`
+        : "Import complete.",
+    });
+  } while (nextPageUrl);
+
+  return allPeople;
 }

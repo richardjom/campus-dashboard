@@ -3,6 +3,10 @@ type ProxyPcoCredentials = {
   secret: string;
 };
 
+type PeopleRequestBody = ProxyPcoCredentials & {
+  pageUrl?: string;
+};
+
 type PcoApiPerson = {
   type: "Person";
   id: string;
@@ -50,14 +54,6 @@ type PcoRawPerson = {
   birthdate: string | null;
 };
 
-type PcoImportProgress = {
-  loaded: number;
-  total: number | null;
-  page: number;
-  pageCount: number | null;
-  message: string;
-};
-
 const PCO_BASE = "https://api.planningcenteronline.com";
 const USER_AGENT = "Sunday Base Planning Center Import";
 const PEOPLE_PER_PAGE = 100;
@@ -82,19 +78,20 @@ export default async function handler(
 
   try {
     const body = await readJsonBody(req);
-    const credentials = normalizeCredentials(body);
+    const normalized = normalizeRequest(body);
 
-    if (!credentials) {
+    if (!normalized) {
       sendJson(res, 400, { error: "Missing Planning Center credentials." });
       return;
     }
 
-    const result = await fetchPcoPeople(credentials);
+    const result = await fetchPcoPeoplePage(normalized);
     sendJson(res, 200, {
       data: result.people,
       meta: {
         total: result.total,
-        pageCount: result.pageCount,
+        count: result.count,
+        nextPageUrl: result.nextPageUrl,
       },
     });
   } catch (error) {
@@ -122,82 +119,67 @@ function authHeader(credentials: ProxyPcoCredentials) {
   return `Basic ${Buffer.from(`${credentials.appId}:${credentials.secret}`).toString("base64")}`;
 }
 
-async function fetchPcoPeople(
-  credentials: ProxyPcoCredentials,
-  onProgress?: (progress: PcoImportProgress) => void,
-) {
-  const people: PcoRawPerson[] = [];
-  let url: string | null = `${PCO_BASE}/people/v2/people?per_page=100&include=emails,phone_numbers`;
-  let page = 0;
-  let total: number | null = null;
+async function fetchPcoPeoplePage(request: PeopleRequestBody) {
+  const response = await fetchPcoPage(resolvePageUrl(request.pageUrl), request);
 
-  while (url) {
-    page += 1;
-    const response = await fetchPcoPage(url, credentials);
+  const json = (await response.json()) as {
+    data: PcoApiPerson[];
+    included?: Array<PcoApiEmail | PcoApiPhone>;
+    meta?: { total_count?: number; count?: number };
+    links: { next?: string };
+  };
 
-    const json = (await response.json()) as {
-      data: PcoApiPerson[];
-      included?: Array<PcoApiEmail | PcoApiPhone>;
-      meta?: { total_count?: number; count?: number };
-      links: { next?: string };
-    };
+  const emailsById = new Map<string, string>();
+  const phonesById = new Map<string, string>();
 
-    if (typeof json.meta?.total_count === "number") {
-      total = json.meta.total_count;
+  for (const item of json.included ?? []) {
+    if (item.type === "Email" && item.attributes.primary) {
+      emailsById.set(item.id, item.attributes.address);
     }
 
-    const emailsById = new Map<string, string>();
-    const phonesById = new Map<string, string>();
-
-    for (const item of json.included ?? []) {
-      if (item.type === "Email" && item.attributes.primary) {
-        emailsById.set(item.id, item.attributes.address);
-      }
-
-      if (item.type === "PhoneNumber" && item.attributes.primary) {
-        phonesById.set(item.id, item.attributes.number);
-      }
+    if (item.type === "PhoneNumber" && item.attributes.primary) {
+      phonesById.set(item.id, item.attributes.number);
     }
-
-    for (const person of json.data) {
-      const emailId = person.relationships.emails?.data.find((entry) => emailsById.has(entry.id))?.id;
-      const phoneId = person.relationships.phone_numbers?.data.find((entry) => phonesById.has(entry.id))?.id;
-
-      people.push({
-        id: person.id,
-        firstName: person.attributes.first_name ?? "",
-        lastName: person.attributes.last_name ?? "",
-        email: emailId ? (emailsById.get(emailId) ?? "") : "",
-        phone: phoneId ? (phonesById.get(phoneId) ?? "") : "",
-        membership: person.attributes.membership ?? "Visitor",
-        status: person.attributes.status ?? "active",
-        createdAt: person.attributes.created_at,
-        updatedAt: person.attributes.updated_at,
-        primaryCampusId: person.attributes.primary_campus_id ?? null,
-        gender: person.attributes.gender ?? "",
-        birthdate: person.attributes.birthdate ?? null,
-      });
-    }
-
-    const pageCount = total && total > 0 ? Math.ceil(total / PEOPLE_PER_PAGE) : null;
-    onProgress?.({
-      loaded: people.length,
-      total,
-      page,
-      pageCount,
-      message: pageCount
-        ? `Loaded page ${page} of ${pageCount} from Planning Center…`
-        : `Loaded ${people.length.toLocaleString()} people from Planning Center…`,
-    });
-
-    url = json.links.next ?? null;
   }
+
+  const people = json.data.map((person) => {
+    const emailId = person.relationships.emails?.data.find((entry) => emailsById.has(entry.id))?.id;
+    const phoneId = person.relationships.phone_numbers?.data.find((entry) => phonesById.has(entry.id))?.id;
+
+    return {
+      id: person.id,
+      firstName: person.attributes.first_name ?? "",
+      lastName: person.attributes.last_name ?? "",
+      email: emailId ? (emailsById.get(emailId) ?? "") : "",
+      phone: phoneId ? (phonesById.get(phoneId) ?? "") : "",
+      membership: person.attributes.membership ?? "Visitor",
+      status: person.attributes.status ?? "active",
+      createdAt: person.attributes.created_at,
+      updatedAt: person.attributes.updated_at,
+      primaryCampusId: person.attributes.primary_campus_id ?? null,
+      gender: person.attributes.gender ?? "",
+      birthdate: person.attributes.birthdate ?? null,
+    };
+  });
 
   return {
     people,
-    total: total ?? people.length,
-    pageCount: page,
+    total: typeof json.meta?.total_count === "number" ? json.meta.total_count : people.length,
+    count: typeof json.meta?.count === "number" ? json.meta.count : people.length,
+    nextPageUrl: json.links.next ?? null,
   };
+}
+
+function resolvePageUrl(pageUrl?: string) {
+  if (!pageUrl) {
+    return `${PCO_BASE}/people/v2/people?per_page=${PEOPLE_PER_PAGE}&include=emails,phone_numbers`;
+  }
+
+  if (!pageUrl.startsWith(PCO_BASE)) {
+    throw new PlanningCenterApiError(400, "Invalid Planning Center page URL.");
+  }
+
+  return pageUrl;
 }
 
 async function fetchPcoPage(url: string, credentials: ProxyPcoCredentials) {
@@ -287,7 +269,7 @@ async function readJsonBody(req: { body?: unknown; on?: (event: string, cb: (chu
   });
 }
 
-function normalizeCredentials(body: unknown): ProxyPcoCredentials | null {
+function normalizeRequest(body: unknown): PeopleRequestBody | null {
   if (!body || typeof body !== "object") {
     return null;
   }
@@ -295,12 +277,15 @@ function normalizeCredentials(body: unknown): ProxyPcoCredentials | null {
   const candidate = body as Record<string, unknown>;
   const appId = typeof candidate.appId === "string" ? candidate.appId.trim() : "";
   const secret = typeof candidate.secret === "string" ? candidate.secret.trim() : "";
+  const pageUrl = typeof candidate.pageUrl === "string" && candidate.pageUrl.trim()
+    ? candidate.pageUrl.trim()
+    : undefined;
 
   if (!appId || !secret) {
     return null;
   }
 
-  return { appId, secret };
+  return { appId, secret, pageUrl };
 }
 
 function sendJson(
