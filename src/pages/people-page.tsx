@@ -48,21 +48,25 @@ export function PeoplePage() {
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(100);
 
   useEffect(() => {
-    const stored = loadPeople();
-    if (stored.length > 0) {
-      setPeople(stored);
-      setSource("real");
-    } else {
-      setPeople(getMockPeople());
-      setSource("mock");
-    }
+    void (async () => {
+      const stored = await loadPeople();
+      if (stored.length > 0) {
+        setPeople(stored);
+        setSource("real");
+      } else {
+        setPeople(getMockPeople());
+        setSource("mock");
+      }
+    })();
 
     const onUpdate = () => {
-      const updated = loadPeople();
-      if (updated.length > 0) {
-        setPeople(updated);
-        setSource("real");
-      }
+      void (async () => {
+        const updated = await loadPeople();
+        if (updated.length > 0) {
+          setPeople(updated);
+          setSource("real");
+        }
+      })();
     };
     window.addEventListener("church-dashboard-people-updated", onUpdate);
     return () => window.removeEventListener("church-dashboard-people-updated", onUpdate);
@@ -108,16 +112,16 @@ export function PeoplePage() {
   const pageStart = filtered.length === 0 ? 0 : (safePage - 1) * pageSize + 1;
   const pageEnd = filtered.length === 0 ? 0 : Math.min(filtered.length, safePage * pageSize);
 
-  const handleStageUpdate = (personId: string) => {
+  const handleStageUpdate = async (personId: string) => {
     const updated = people.map((p) =>
       p.id === personId ? { ...p, journeyStage: editStage } : p,
     );
     setPeople(updated);
-    savePeople(updated);
+    await savePeople(updated);
     setEditingId(null);
   };
 
-  const handleDirectoryStatusUpdate = (personId: string, nextStatus: "active" | "inactive" | "archived") => {
+  const handleDirectoryStatusUpdate = async (personId: string, nextStatus: "active" | "inactive" | "archived") => {
     const target = people.find((person) => person.id === personId);
     if (!target) return;
 
@@ -131,7 +135,7 @@ export function PeoplePage() {
 
     const updated = updatePersonDirectoryStatus(people, personId, nextStatus);
     setPeople(updated);
-    savePeople(updated);
+    await savePeople(updated);
   };
 
   const directoryCounts = useMemo(() => {

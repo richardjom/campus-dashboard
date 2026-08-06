@@ -44,7 +44,11 @@ export function SettingsPage() {
     const saved = loadPcoCredentials();
     if (saved) setSavedCredentials(saved);
     setImportSummary(loadPcoImportSummary());
-    setPeopleCount(loadPeople().filter((p) => p.source === "pco").length);
+
+    void (async () => {
+      const people = await loadPeople();
+      setPeopleCount(people.filter((p) => p.source === "pco").length);
+    })();
   }, []);
 
   useEffect(() => {
@@ -109,7 +113,7 @@ export function SettingsPage() {
         setImportProgress(progress);
         setLastProgressAt(Date.now());
       });
-      const merged = importPcopeople(rawPeople);
+      const merged = await importPcopeople(rawPeople);
       const summary = {
         importedCount: rawPeople.length,
         lastSyncedAt: new Date().toISOString(),
@@ -121,7 +125,7 @@ export function SettingsPage() {
           membership: person.membership,
         })),
       } satisfies PcoImportSummary;
-      savePeople(merged);
+      await savePeople(merged);
       savePcoImportSummary(summary);
       setImportSummary(summary);
       setPeopleCount(merged.filter((p) => p.source === "pco").length);

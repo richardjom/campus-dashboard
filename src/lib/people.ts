@@ -51,20 +51,35 @@ export type PipelineEntry = {
 
 const PEOPLE_KEY = "church-dashboard-people";
 const PIPELINE_KEY = "church-dashboard-pipeline";
+const DB_NAME = "church-dashboard-db";
+const DB_VERSION = 1;
+const KV_STORE = "kv";
+const PEOPLE_RECORD_KEY = "people";
 
 // --- persistence ---
 
-export function savePeople(people: Person[]) {
-  localStorage.setItem(PEOPLE_KEY, JSON.stringify(people));
+export async function savePeople(people: Person[]) {
+  await writeKvRecord(PEOPLE_RECORD_KEY, people);
+  localStorage.removeItem(PEOPLE_KEY);
   window.dispatchEvent(new Event("church-dashboard-people-updated"));
 }
 
-export function loadPeople(): Person[] {
+export async function loadPeople(): Promise<Person[]> {
+  const stored = await readKvRecord<Person[]>(PEOPLE_RECORD_KEY);
+  if (Array.isArray(stored)) {
+    return stored;
+  }
+
   const raw = localStorage.getItem(PEOPLE_KEY);
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (Array.isArray(parsed)) {
+      await writeKvRecord(PEOPLE_RECORD_KEY, parsed);
+      localStorage.removeItem(PEOPLE_KEY);
+      return parsed;
+    }
+    return [];
   } catch {
     return [];
   }
@@ -134,8 +149,8 @@ export function deriveDirectoryStatus(pcoStatus?: string): "active" | "inactive"
   return "active";
 }
 
-export function importPcopeople(rawPeople: PcoRawPerson[]): Person[] {
-  const existing = loadPeople();
+export async function importPcopeople(rawPeople: PcoRawPerson[]): Promise<Person[]> {
+  const existing = await loadPeople();
   const existingById = new Map(existing.map((p) => [p.id, p]));
 
   const imported: Person[] = rawPeople.map((raw) => {
@@ -162,6 +177,56 @@ export function importPcopeople(rawPeople: PcoRawPerson[]): Person[] {
   // Merge: keep manual/csv people, replace pco ones
   const nonPco = existing.filter((p) => p.source !== "pco");
   return [...nonPco, ...imported];
+}
+
+async function openDashboardDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = window.indexedDB.open(DB_NAME, DB_VERSION);
+
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(KV_STORE)) {
+        db.createObjectStore(KV_STORE);
+      }
+    };
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("Could not open local database."));
+  });
+}
+
+async function readKvRecord<T>(key: string): Promise<T | null> {
+  const db = await openDashboardDb();
+
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(KV_STORE, "readonly");
+    const store = tx.objectStore(KV_STORE);
+    const request = store.get(key);
+
+    request.onsuccess = () => {
+      const result = request.result;
+      resolve(result === undefined ? null : (result as T));
+    };
+    request.onerror = () => reject(request.error ?? new Error(`Could not read ${key} from local database.`));
+    tx.oncomplete = () => db.close();
+    tx.onerror = () => reject(tx.error ?? new Error(`Could not read ${key} from local database.`));
+  });
+}
+
+async function writeKvRecord(key: string, value: unknown): Promise<void> {
+  const db = await openDashboardDb();
+
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(KV_STORE, "readwrite");
+    const store = tx.objectStore(KV_STORE);
+    store.put(value, key);
+
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onerror = () => reject(tx.error ?? new Error(`Could not save ${key} to local database.`));
+  });
 }
 
 // --- pipeline helpers ---
