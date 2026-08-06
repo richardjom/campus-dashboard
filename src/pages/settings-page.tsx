@@ -155,6 +155,9 @@ export function SettingsPage() {
     if (importError.includes("401") || importError.toLowerCase().includes("invalid")) {
       return "Planning Center rejected the credentials. Double-check that the client ID and secret belong to the same Personal Access Token.";
     }
+    if (importError.includes("429") || importError.toLowerCase().includes("rate-limit")) {
+      return "Planning Center temporarily throttled the import. Wait about a minute, then run the import again.";
+    }
     if (importError.toLowerCase().includes("proxy")) {
       return "The app could not reach the Planning Center import service. Refresh the page and try again.";
     }

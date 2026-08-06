@@ -61,6 +61,8 @@ type PcoImportProgress = {
 const PCO_BASE = "https://api.planningcenteronline.com";
 const USER_AGENT = "Sunday Base Planning Center Import";
 const PEOPLE_PER_PAGE = 100;
+const MAX_RATE_LIMIT_RETRIES = 4;
+const DEFAULT_RATE_LIMIT_WAIT_MS = 3000;
 
 export default async function handler(
   req: { body?: unknown; method?: string; on?: (event: string, cb: (chunk?: string) => void) => void },
@@ -96,8 +98,23 @@ export default async function handler(
       },
     });
   } catch (error) {
+    if (error instanceof PlanningCenterApiError) {
+      sendJson(res, error.statusCode, { error: error.message });
+      return;
+    }
+
     const message = error instanceof Error ? error.message : "Unexpected proxy error.";
     sendJson(res, 500, { error: message });
+  }
+}
+
+class PlanningCenterApiError extends Error {
+  statusCode: number;
+
+  constructor(statusCode: number, message: string) {
+    super(message);
+    this.name = "PlanningCenterApiError";
+    this.statusCode = statusCode;
   }
 }
 
@@ -116,16 +133,7 @@ async function fetchPcoPeople(
 
   while (url) {
     page += 1;
-    const response = await fetch(url, {
-      headers: {
-        Authorization: authHeader(credentials),
-        "User-Agent": USER_AGENT,
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Planning Center API error: ${response.status} ${response.statusText}`);
-    }
+    const response = await fetchPcoPage(url, credentials);
 
     const json = (await response.json()) as {
       data: PcoApiPerson[];
@@ -190,6 +198,58 @@ async function fetchPcoPeople(
     total: total ?? people.length,
     pageCount: page,
   };
+}
+
+async function fetchPcoPage(url: string, credentials: ProxyPcoCredentials) {
+  for (let attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt += 1) {
+    const response = await fetch(url, {
+      headers: {
+        Authorization: authHeader(credentials),
+        "User-Agent": USER_AGENT,
+      },
+    });
+
+    if (response.status === 429) {
+      if (attempt === MAX_RATE_LIMIT_RETRIES) {
+        throw new PlanningCenterApiError(
+          429,
+          "Planning Center is rate-limiting imports right now. Wait a minute, then try the import again.",
+        );
+      }
+
+      await delay(getRetryDelayMs(response, attempt));
+      continue;
+    }
+
+    if (!response.ok) {
+      throw new PlanningCenterApiError(
+        response.status,
+        `Planning Center API error: ${response.status} ${response.statusText}`,
+      );
+    }
+
+    return response;
+  }
+
+  throw new PlanningCenterApiError(
+    429,
+    "Planning Center is rate-limiting imports right now. Wait a minute, then try the import again.",
+  );
+}
+
+function getRetryDelayMs(response: Response, attempt: number) {
+  const retryAfterHeader = response.headers.get("Retry-After");
+  const retryAfterSeconds = retryAfterHeader ? Number.parseInt(retryAfterHeader, 10) : Number.NaN;
+
+  if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+    return retryAfterSeconds * 1000;
+  }
+
+  return DEFAULT_RATE_LIMIT_WAIT_MS * Math.max(1, attempt + 1);
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function readJsonBody(req: { body?: unknown; on?: (event: string, cb: (chunk?: string) => void) => void }) {
