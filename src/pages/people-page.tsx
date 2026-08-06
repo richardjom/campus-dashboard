@@ -43,6 +43,7 @@ export function PeoplePage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editStage, setEditStage] = useState<JourneyStage>("returningGuest");
   const [directoryFilter, setDirectoryFilter] = useState<DirectoryStatusFilter>("active");
+  const [campusFilter, setCampusFilter] = useState("all");
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(100);
 
@@ -71,6 +72,12 @@ export function PeoplePage() {
     return () => window.removeEventListener("church-dashboard-people-updated", onUpdate);
   }, []);
 
+  const campusOptions = useMemo(() => {
+    return Array.from(new Set(people.map((person) => person.campus.trim()).filter(Boolean))).sort((a, b) =>
+      a.localeCompare(b),
+    );
+  }, [people]);
+
   const funnel = useMemo(() => buildJourneyFunnel(people), [people]);
   const maxCount = Math.max(...funnel.map((row) => row.count), 1);
 
@@ -86,6 +93,10 @@ export function PeoplePage() {
           : directoryFilter === "inactive"
             ? personDirectoryStatus !== "active"
             : personDirectoryStatus === "active";
+      const matchesCampus =
+        campusFilter === "all"
+          ? true
+          : (person.campus.trim() || "Unassigned") === campusFilter;
       const query = search.toLowerCase();
       const matchesSearch =
         !query ||
@@ -95,13 +106,13 @@ export function PeoplePage() {
         person.campus.toLowerCase().includes(query) ||
         (person.pcoMembership ?? "").toLowerCase().includes(query) ||
         personDirectoryStatus.toLowerCase().includes(query);
-      return matchesStage && matchesDirectory && matchesSearch;
+      return matchesStage && matchesDirectory && matchesCampus && matchesSearch;
     });
-  }, [people, activeStage, directoryFilter, search]);
+  }, [people, activeStage, directoryFilter, campusFilter, search]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, activeStage, directoryFilter, pageSize]);
+  }, [search, activeStage, directoryFilter, campusFilter, pageSize]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(currentPage, totalPages);
@@ -280,6 +291,35 @@ export function PeoplePage() {
               className="h-10 w-full rounded-2xl border border-gray-200 bg-[#fbfbfc] pl-10 pr-4 text-sm outline-none transition placeholder:text-gray-400 hover:border-gray-300 focus:border-slate-900 sm:w-64"
             />
           </div>
+        </div>
+
+        <div className="flex flex-col gap-3 border-b border-gray-100 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap gap-2">
+            <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-slate-600">
+              Campus
+            </span>
+            <select
+              value={campusFilter}
+              onChange={(e) => setCampusFilter(e.target.value)}
+              className="h-10 rounded-2xl border border-gray-200 bg-white px-3 text-sm font-medium text-slate-900 outline-none transition hover:border-gray-300 focus:border-slate-900"
+            >
+              <option value="all">All campuses ({people.length})</option>
+              {campusOptions.map((campus) => {
+                const count = people.filter((person) => person.campus.trim() === campus).length;
+                return (
+                  <option key={campus} value={campus}>
+                    {campus} ({count})
+                  </option>
+                );
+              })}
+              <option value="Unassigned">
+                Unassigned ({people.filter((person) => !person.campus.trim()).length})
+              </option>
+            </select>
+          </div>
+          <p className="text-sm text-gray-500">
+            {campusFilter === "all" ? "Viewing every campus" : `Campus filter: ${campusFilter}`}
+          </p>
         </div>
 
         <div className="mt-2 flex flex-wrap gap-2 py-4">
