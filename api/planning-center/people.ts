@@ -75,6 +75,7 @@ type PcoRawPerson = {
   updatedAt: string;
   primaryCampusId: string | null;
   campusName: string;
+  journeyStageHint: string | null;
   gender: string;
   birthdate: string | null;
 };
@@ -211,6 +212,7 @@ async function fetchPcoPeoplePage(request: PeopleRequestBody) {
       updatedAt: person.attributes.updated_at,
       primaryCampusId: person.attributes.primary_campus_id ?? null,
       campusName: resolveImportedCampusName(primaryCampusName, fieldDataByPersonId.get(person.id) ?? [], campusNamesById),
+      journeyStageHint: inferJourneyStageHint(person.attributes.membership ?? "Visitor", fieldDataByPersonId.get(person.id) ?? []),
       gender: person.attributes.gender ?? "",
       birthdate: person.attributes.birthdate ?? null,
     };
@@ -342,6 +344,62 @@ function isGenericCampusName(campusName: string) {
 
 function areCampusNamesEquivalent(left: string, right: string) {
   return normalizeCampusToken(left) === normalizeCampusToken(right);
+}
+
+function inferJourneyStageHint(membership: string, fieldValues: string[]) {
+  const signals = [membership, ...fieldValues]
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+
+  if (
+    signals.some((value) =>
+      includesAny(value, ["team leader", "leader", "coordinator", "coach", "captain", "director"]),
+    )
+  ) {
+    return "teamLeader";
+  }
+
+  if (
+    signals.some((value) =>
+      includesAny(value, [
+        "dream team",
+        "serve team",
+        "serving team",
+        "volunteer",
+        "serve",
+        "serving",
+        "team member",
+        "host team",
+        "worship team",
+        "production team",
+        "kids team",
+      ]),
+    )
+  ) {
+    return "teamMember";
+  }
+
+  if (
+    signals.some((value) =>
+      includesAny(value, ["growth track", "next step", "next steps", "connect class", "connect track", "member class"]),
+    )
+  ) {
+    return "growthTrack";
+  }
+
+  if (signals.some((value) => includesAny(value, ["first time guest", "guest"]))) {
+    return "firstTimeGuest";
+  }
+
+  if (signals.some((value) => includesAny(value, ["visitor", "regular", "attendee"]))) {
+    return "returningGuest";
+  }
+
+  return null;
+}
+
+function includesAny(value: string, needles: string[]) {
+  return needles.some((needle) => value.includes(needle));
 }
 
 async function fetchPcoPage(url: string, credentials: ProxyPcoCredentials) {

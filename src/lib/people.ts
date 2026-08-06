@@ -22,6 +22,7 @@ export type Person = {
   phone: string;
   campus: string;
   journeyStage: JourneyStage;
+  journeyStageSource?: "imported" | "manual";
   source: "pco" | "manual" | "csv";
   pcoMembership?: string;
   pcoStatus?: string;
@@ -118,7 +119,10 @@ const pcoMembershipStageMap: Record<string, JourneyStage> = {
   Leader: "teamLeader",
 };
 
-export function deriveJourneyStage(pcoMembership: string): JourneyStage {
+export function deriveJourneyStage(pcoMembership: string, journeyStageHint?: string | null): JourneyStage {
+  const hintedStage = normalizeJourneyStageHint(journeyStageHint);
+  if (hintedStage) return hintedStage;
+
   const normalized = pcoMembership?.trim() ?? "";
   const exactMatch = pcoMembershipStageMap[normalized];
   if (exactMatch) return exactMatch;
@@ -176,6 +180,7 @@ export async function importPcopeople(rawPeople: PcoRawPerson[]): Promise<Person
 
   const imported: Person[] = rawPeople.map((raw) => {
     const existing = existingById.get(`pco-${raw.id}`);
+    const shouldPreserveManualStage = existing?.journeyStageSource === "manual";
     return {
       id: `pco-${raw.id}`,
       firstName: raw.firstName,
@@ -183,7 +188,10 @@ export async function importPcopeople(rawPeople: PcoRawPerson[]): Promise<Person
       email: raw.email,
       phone: raw.phone,
       campus: raw.campusName,
-      journeyStage: existing?.journeyStage ?? deriveJourneyStage(raw.membership),
+      journeyStage: shouldPreserveManualStage
+        ? existing.journeyStage
+        : deriveJourneyStage(raw.membership, raw.journeyStageHint),
+      journeyStageSource: shouldPreserveManualStage ? "manual" : "imported",
       source: "pco" as const,
       pcoMembership: raw.membership,
       pcoStatus: raw.status,
@@ -371,6 +379,7 @@ function normalizeStoredPerson(person: Person): Person {
   return {
     ...person,
     journeyStage: migrateLegacyJourneyStage(person.journeyStage),
+    journeyStageSource: person.journeyStageSource ?? (person.source === "pco" ? "imported" : "manual"),
   };
 }
 
@@ -395,6 +404,19 @@ function migrateLegacyJourneyStage(stage: string): JourneyStage {
       return "teamLeader";
     default:
       return "returningGuest";
+  }
+}
+
+function normalizeJourneyStageHint(stage: string | null | undefined): JourneyStage | null {
+  switch (stage) {
+    case "firstTimeGuest":
+    case "returningGuest":
+    case "growthTrack":
+    case "teamMember":
+    case "teamLeader":
+      return stage;
+    default:
+      return null;
   }
 }
 

@@ -139,7 +139,7 @@ export function PeoplePage() {
 
   const handleStageUpdate = async (personId: string) => {
     const updated = people.map((p) =>
-      p.id === personId ? { ...p, journeyStage: editStage } : p,
+      p.id === personId ? { ...p, journeyStage: editStage, journeyStageSource: "manual" as const } : p,
     );
     setPeople(updated);
     await savePeople(updated);
@@ -438,9 +438,11 @@ export function PeoplePage() {
                   </p>
                   <p className="text-sm text-gray-500">
                     {person.email || "—"}
-                    {person.campus ? ` · ${person.campus}` : ""}
                   </p>
                   <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                    <span className="rounded-full bg-indigo-50 px-2.5 py-1 font-medium text-indigo-700">
+                      Campus: {person.campus || "Unassigned"}
+                    </span>
                     <span className="rounded-full bg-gray-100 px-2.5 py-1 font-medium text-gray-600">
                       {(person.directoryStatus ?? "active").replace(/^./, (c) => c.toUpperCase())}
                     </span>
