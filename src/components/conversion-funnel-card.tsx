@@ -138,7 +138,8 @@ export function ConversionFunnelCard({
       <p className="mt-4 text-xs leading-5 text-gray-500">
         Stronger reporting will come when Planning Center person-level follow-up is connected: FTG first visit, second
         visit, Growth Track registration, Growth Track completion, serving signup, and baptism can then be measured as
-        true cohort conversion instead of aggregate activity.
+        true cohort conversion instead of aggregate activity. For your church, Growth Track should also be read on its
+        monthly 4-week cadence that starts at the top of the month and skips the fifth Sunday when one exists.
       </p>
     </section>
   );

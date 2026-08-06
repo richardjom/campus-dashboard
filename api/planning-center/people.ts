@@ -27,6 +27,22 @@ type PcoApiPerson = {
   };
 };
 
+type PcoApiFieldDatum = {
+  type: "FieldDatum";
+  id: string;
+  attributes: {
+    value: string | null;
+  };
+  relationships?: {
+    customizable?: {
+      data?: {
+        type: string;
+        id: string;
+      } | null;
+    };
+  };
+};
+
 type PcoApiEmail = {
   type: "Email";
   id: string;
@@ -68,6 +84,16 @@ const USER_AGENT = "Sunday Base Planning Center Import";
 const PEOPLE_PER_PAGE = 100;
 const MAX_RATE_LIMIT_RETRIES = 4;
 const DEFAULT_RATE_LIMIT_WAIT_MS = 3000;
+const GENERIC_CAMPUS_NAMES = new Set([
+  "all campus",
+  "all campuses",
+  "campus",
+  "church wide",
+  "churchwide",
+  "default campus",
+  "main",
+  "main campus",
+]);
 
 export default async function handler(
   req: { body?: unknown; method?: string; on?: (event: string, cb: (chunk?: string) => void) => void },
@@ -134,13 +160,14 @@ async function fetchPcoPeoplePage(request: PeopleRequestBody) {
 
   const json = (await response.json()) as {
     data: PcoApiPerson[];
-    included?: Array<PcoApiEmail | PcoApiPhone>;
+    included?: Array<PcoApiEmail | PcoApiPhone | PcoApiFieldDatum>;
     meta?: { total_count?: number; count?: number };
     links: { next?: string };
   };
 
   const emailsById = new Map<string, string>();
   const phonesById = new Map<string, string>();
+  const fieldDataByPersonId = new Map<string, string[]>();
 
   for (const item of json.included ?? []) {
     if (item.type === "Email" && item.attributes.primary) {
@@ -150,11 +177,27 @@ async function fetchPcoPeoplePage(request: PeopleRequestBody) {
     if (item.type === "PhoneNumber" && item.attributes.primary) {
       phonesById.set(item.id, item.attributes.number);
     }
+
+    if (item.type === "FieldDatum") {
+      const personId = item.relationships?.customizable?.data?.type === "Person"
+        ? item.relationships.customizable.data.id
+        : null;
+      const value = item.attributes.value?.trim();
+
+      if (!personId || !value) continue;
+
+      const existingValues = fieldDataByPersonId.get(personId) ?? [];
+      existingValues.push(value);
+      fieldDataByPersonId.set(personId, existingValues);
+    }
   }
 
   const people = json.data.map((person) => {
     const emailId = person.relationships.emails?.data.find((entry) => emailsById.has(entry.id))?.id;
     const phoneId = person.relationships.phone_numbers?.data.find((entry) => phonesById.has(entry.id))?.id;
+    const primaryCampusName = person.attributes.primary_campus_id
+      ? (campusNamesById.get(person.attributes.primary_campus_id) ?? "")
+      : "";
 
     return {
       id: person.id,
@@ -167,9 +210,7 @@ async function fetchPcoPeoplePage(request: PeopleRequestBody) {
       createdAt: person.attributes.created_at,
       updatedAt: person.attributes.updated_at,
       primaryCampusId: person.attributes.primary_campus_id ?? null,
-      campusName: person.attributes.primary_campus_id
-        ? (campusNamesById.get(person.attributes.primary_campus_id) ?? "")
-        : "",
+      campusName: resolveImportedCampusName(primaryCampusName, fieldDataByPersonId.get(person.id) ?? [], campusNamesById),
       gender: person.attributes.gender ?? "",
       birthdate: person.attributes.birthdate ?? null,
     };
@@ -199,7 +240,7 @@ async function fetchCampusNames(credentials: ProxyPcoCredentials) {
 
 function resolvePageUrl(pageUrl?: string) {
   if (!pageUrl) {
-    return `${PCO_BASE}/people/v2/people?per_page=${PEOPLE_PER_PAGE}&include=emails,phone_numbers`;
+    return `${PCO_BASE}/people/v2/people?per_page=${PEOPLE_PER_PAGE}&include=emails,phone_numbers,field_data`;
   }
 
   if (!pageUrl.startsWith(PCO_BASE)) {
@@ -207,6 +248,100 @@ function resolvePageUrl(pageUrl?: string) {
   }
 
   return pageUrl;
+}
+
+function resolveImportedCampusName(
+  primaryCampusName: string,
+  fieldValues: string[],
+  campusNamesById: Map<string, string>,
+) {
+  const primaryName = primaryCampusName.trim();
+  const inferredCampus = inferCampusFromFieldValues(fieldValues, campusNamesById);
+
+  if (!inferredCampus) return primaryName;
+  if (!primaryName || isGenericCampusName(primaryName)) return inferredCampus;
+  if (areCampusNamesEquivalent(primaryName, inferredCampus)) return primaryName;
+
+  return primaryName;
+}
+
+function inferCampusFromFieldValues(fieldValues: string[], campusNamesById: Map<string, string>) {
+  const aliasEntries = buildCampusAliasEntries(campusNamesById);
+
+  for (const rawValue of fieldValues) {
+    const normalizedValue = normalizeCampusToken(rawValue);
+    if (!normalizedValue) continue;
+
+    for (const [alias, campusName] of aliasEntries) {
+      if (matchesCampusAlias(normalizedValue, alias)) {
+        return campusName;
+      }
+    }
+  }
+
+  return "";
+}
+
+function buildCampusAliasEntries(campusNamesById: Map<string, string>) {
+  const aliasMap = new Map<string, string>();
+
+  for (const campusName of campusNamesById.values()) {
+    const trimmedName = campusName.trim();
+    if (!trimmedName) continue;
+
+    for (const alias of getCampusAliases(trimmedName)) {
+      if (!aliasMap.has(alias)) {
+        aliasMap.set(alias, trimmedName);
+      }
+    }
+  }
+
+  return Array.from(aliasMap.entries()).sort((left, right) => right[0].length - left[0].length);
+}
+
+function getCampusAliases(campusName: string) {
+  const aliases = new Set<string>();
+  const normalized = normalizeCampusToken(campusName);
+
+  if (normalized) aliases.add(normalized);
+
+  const stripped = normalized
+    .replace(/\bcampus\b/g, " ")
+    .replace(/\blocation\b/g, " ")
+    .replace(/\bsite\b/g, " ")
+    .replace(/\bchurch\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (stripped) aliases.add(stripped);
+
+  return aliases;
+}
+
+function normalizeCampusToken(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function matchesCampusAlias(normalizedValue: string, alias: string) {
+  return (
+    normalizedValue === alias ||
+    normalizedValue.startsWith(`${alias} `) ||
+    normalizedValue.endsWith(` ${alias}`) ||
+    normalizedValue.includes(` ${alias} `)
+  );
+}
+
+function isGenericCampusName(campusName: string) {
+  return GENERIC_CAMPUS_NAMES.has(normalizeCampusToken(campusName));
+}
+
+function areCampusNamesEquivalent(left: string, right: string) {
+  return normalizeCampusToken(left) === normalizeCampusToken(right);
 }
 
 async function fetchPcoPage(url: string, credentials: ProxyPcoCredentials) {

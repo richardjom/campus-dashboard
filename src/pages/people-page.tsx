@@ -240,7 +240,8 @@ export function PeoplePage() {
           <p className="mt-3 text-sm leading-6 text-gray-600">
             Planning Center memberships containing words like `growth track`, `next steps`, `volunteer`, `serve`,
             `team lead`, or `coordinator` now flow into this process automatically. You can still reassign any person
-            manually by clicking their stage pill in the directory below.
+            manually by clicking their stage pill in the directory below. Growth Track is treated as your 4-week
+            monthly cycle that starts at the top of the month, with five-Sunday months creating a skip week.
           </p>
         </div>
 
