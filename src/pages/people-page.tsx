@@ -6,35 +6,34 @@ import {
   getMockPeople,
   buildJourneyFunnel,
   savePeople,
+  isStrictlyInactive,
+  STALE_INACTIVE_DAYS,
+  getPersonActivityDate,
   updatePersonDirectoryStatus,
   type Person,
   type JourneyStage,
 } from "../lib/people";
 
 const PAGE_SIZE_OPTIONS = [50, 100, 250] as const;
-type DirectoryStatusFilter = "active" | "inactive" | "all";
+type DirectoryStatusFilter = "active" | "inactive" | "staleInactive" | "all";
 
 const stageColors: Record<JourneyStage, { bg: string; text: string; dot: string }> = {
-  guest:     { bg: "bg-orange-100",  text: "text-orange-700",  dot: "#f97316" },
-  visitor:   { bg: "bg-yellow-100",  text: "text-yellow-700",  dot: "#facc15" },
-  regular:   { bg: "bg-sky-100",     text: "text-sky-700",     dot: "#38bdf8" },
-  member:    { bg: "bg-blue-100",    text: "text-blue-700",    dot: "#2563eb" },
-  connected: { bg: "bg-violet-100",  text: "text-violet-700",  dot: "#7c3aed" },
-  volunteer: { bg: "bg-emerald-100", text: "text-emerald-700", dot: "#10b981" },
-  leader:    { bg: "bg-slate-100",   text: "text-slate-700",   dot: "#0f172a" },
+  firstTimeGuest: { bg: "bg-orange-100", text: "text-orange-700", dot: "#f97316" },
+  returningGuest: { bg: "bg-blue-100", text: "text-blue-700", dot: "#2563eb" },
+  growthTrack: { bg: "bg-violet-100", text: "text-violet-700", dot: "#7c3aed" },
+  teamMember: { bg: "bg-emerald-100", text: "text-emerald-700", dot: "#10b981" },
+  teamLeader: { bg: "bg-slate-100", text: "text-slate-700", dot: "#0f172a" },
 };
 
 const stageLabels: Record<JourneyStage, string> = {
-  guest:     "First-time Guest",
-  visitor:   "Visitor",
-  regular:   "Regular",
-  member:    "Member",
-  connected: "Connected",
-  volunteer: "Volunteer",
-  leader:    "Team Lead / Coordinator",
+  firstTimeGuest: "First-Time Guest",
+  returningGuest: "Returning Guest",
+  growthTrack: "Growth Track",
+  teamMember: "On A Team",
+  teamLeader: "Team Leader",
 };
 
-const allStages: JourneyStage[] = ["guest", "visitor", "regular", "member", "connected", "volunteer", "leader"];
+const allStages: JourneyStage[] = ["firstTimeGuest", "returningGuest", "growthTrack", "teamMember", "teamLeader"];
 
 export function PeoplePage() {
   const [people, setPeople] = useState<Person[]>([]);
@@ -42,7 +41,7 @@ export function PeoplePage() {
   const [search, setSearch] = useState("");
   const [activeStage, setActiveStage] = useState<JourneyStage | "all">("all");
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editStage, setEditStage] = useState<JourneyStage>("visitor");
+  const [editStage, setEditStage] = useState<JourneyStage>("returningGuest");
   const [directoryFilter, setDirectoryFilter] = useState<DirectoryStatusFilter>("active");
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(100);
@@ -82,6 +81,8 @@ export function PeoplePage() {
       const matchesDirectory =
         directoryFilter === "all"
           ? true
+          : directoryFilter === "staleInactive"
+            ? isStrictlyInactive(person)
           : directoryFilter === "inactive"
             ? personDirectoryStatus !== "active"
             : personDirectoryStatus === "active";
@@ -139,10 +140,13 @@ export function PeoplePage() {
   };
 
   const directoryCounts = useMemo(() => {
-    const counts = { active: 0, inactive: 0, archived: 0 };
+    const counts = { active: 0, inactive: 0, archived: 0, staleInactive: 0 };
     for (const person of people) {
       const status = person.directoryStatus ?? "active";
       counts[status] += 1;
+      if (isStrictlyInactive(person)) {
+        counts.staleInactive += 1;
+      }
     }
     counts.inactive += counts.archived;
     return counts;
@@ -158,8 +162,8 @@ export function PeoplePage() {
               Journey tracker
             </h1>
             <p className="mt-4 max-w-3xl text-sm leading-7 text-gray-600">
-              See where every person is in their faith journey — from first-time guest to leader. Import from Planning
-              Center in Settings to replace the demo data with your real directory.
+              See where every person is in your next-step process, from first-time guest to Growth Track to joining a
+              team. Import from Planning Center in Settings to replace the demo data with your real directory.
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
@@ -195,11 +199,11 @@ export function PeoplePage() {
       <section className="rounded-[30px] border border-gray-200 bg-white p-6 lg:p-7">
         <div className="border-b border-gray-200 pb-5">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Growth funnel</p>
-          <h2 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-950">Journey stage breakdown</h2>
+          <h2 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-950">Assimilation stage breakdown</h2>
           <p className="mt-3 text-sm leading-6 text-gray-600">
-            Planning Center memberships containing words like `volunteer`, `serve`, `team lead`, or `coordinator`
-            now flow into the serving buckets automatically. You can still reassign any person manually by clicking
-            their stage pill in the directory below.
+            Planning Center memberships containing words like `growth track`, `next steps`, `volunteer`, `serve`,
+            `team lead`, or `coordinator` now flow into this process automatically. You can still reassign any person
+            manually by clicking their stage pill in the directory below.
           </p>
         </div>
 
@@ -303,6 +307,11 @@ export function PeoplePage() {
             onClick={() => setDirectoryFilter("inactive")}
           />
           <DirectoryTab
+            label={`Stale inactive ${STALE_INACTIVE_DAYS}+d (${directoryCounts.staleInactive})`}
+            active={directoryFilter === "staleInactive"}
+            onClick={() => setDirectoryFilter("staleInactive")}
+          />
+          <DirectoryTab
             label={`All statuses (${people.length})`}
             active={directoryFilter === "all"}
             onClick={() => setDirectoryFilter("all")}
@@ -361,7 +370,15 @@ export function PeoplePage() {
                         PCO status: {person.pcoStatus}
                       </span>
                     )}
+                    {isStrictlyInactive(person) && (
+                      <span className="rounded-full bg-rose-50 px-2.5 py-1 font-medium text-rose-700">
+                        Stale inactive
+                      </span>
+                    )}
                   </div>
+                  <p className="mt-1 text-xs text-gray-400">
+                    Last activity: {formatRelativeActivity(getPersonActivityDate(person))}
+                  </p>
                   {person.notes && (
                     <p className="mt-1 text-xs text-gray-400">{person.notes}</p>
                   )}
@@ -479,16 +496,29 @@ export function PeoplePage() {
           </div>
         </div>
         <div className="mt-4 rounded-[22px] border border-gray-200 bg-[#fbfbfc] p-4">
-          <p className="text-sm font-semibold text-slate-950">Deletion safety</p>
+          <p className="text-sm font-semibold text-slate-950">Directory hygiene</p>
           <p className="mt-2 text-sm leading-6 text-gray-600">
-            This directory now uses an archive-first workflow. Mark people inactive or archived to hide them from active
-            reporting without permanently deleting them. Hard delete is intentionally not exposed here yet because it
-            should require stronger confirmation and audit controls.
+            This directory uses an archive-first workflow. Mark people inactive or archived to hide them from active
+            reporting without permanently deleting them, and use the strict stale-inactive filter to isolate records
+            that have been inactive for more than {STALE_INACTIVE_DAYS} days.
           </p>
         </div>
       </section>
     </div>
   );
+}
+
+function formatRelativeActivity(dateStr: string | undefined) {
+  if (!dateStr) return "No recent activity on record";
+
+  const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return "No recent activity on record";
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
 }
 
 function StageTab({
