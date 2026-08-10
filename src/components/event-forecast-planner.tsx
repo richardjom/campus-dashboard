@@ -4,6 +4,7 @@ import {
   CalendarDays,
   Car,
   MessageSquare,
+  Save,
   SlidersHorizontal,
   Target,
   TrendingUp,
@@ -29,6 +30,11 @@ type PlanningHistoryRow = {
   actualAttendance: number | null;
   priorForecast: number | null;
   assumptions: string;
+};
+
+type StoredPlanningHistoryPayload = {
+  updatedAt: string;
+  rows: PlanningHistoryRow[];
 };
 
 type ForecastResult = {
@@ -106,6 +112,79 @@ const seededPlanningHistory: PlanningHistoryRow[] = [
   },
 ];
 
+const planningHistoryStorageKey = "church-dashboard-event-planning-history";
+
+function readPlanningHistoryRows() {
+  if (typeof window === "undefined") {
+    return seededPlanningHistory;
+  }
+
+  const rawValue = window.localStorage.getItem(planningHistoryStorageKey);
+
+  if (!rawValue) {
+    return seededPlanningHistory;
+  }
+
+  try {
+    const payload = JSON.parse(rawValue) as StoredPlanningHistoryPayload;
+    const storedRows = Array.isArray(payload.rows) ? payload.rows.filter(isPlanningHistoryRow) : [];
+    return mergePlanningHistoryRows([...seededPlanningHistory, ...storedRows]);
+  } catch {
+    return seededPlanningHistory;
+  }
+}
+
+function writePlanningHistoryRows(rows: PlanningHistoryRow[]) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const payload: StoredPlanningHistoryPayload = {
+    updatedAt: new Date().toISOString(),
+    rows: mergePlanningHistoryRows(rows),
+  };
+
+  window.localStorage.setItem(planningHistoryStorageKey, JSON.stringify(payload));
+}
+
+function upsertPlanningHistoryRow(rows: PlanningHistoryRow[], row: PlanningHistoryRow) {
+  return mergePlanningHistoryRows([...rows, row]);
+}
+
+function mergePlanningHistoryRows(rows: PlanningHistoryRow[]) {
+  const merged = new Map<string, PlanningHistoryRow>();
+
+  rows.forEach((row) => {
+    merged.set(getPlanningHistoryKey(row), row);
+  });
+
+  return Array.from(merged.values()).sort((left, right) => {
+    if (left.date !== right.date) return left.date.localeCompare(right.date);
+    if (left.campus !== right.campus) return left.campus.localeCompare(right.campus);
+    return left.eventName.localeCompare(right.eventName);
+  });
+}
+
+function getPlanningHistoryKey(row: PlanningHistoryRow) {
+  return `${row.eventName}|${row.campus}|${row.date}`;
+}
+
+function isPlanningHistoryRow(candidate: unknown): candidate is PlanningHistoryRow {
+  if (!candidate || typeof candidate !== "object") {
+    return false;
+  }
+
+  const row = candidate as PlanningHistoryRow;
+  return (
+    bigFivePlanningEvents.some((event) => event.eventName === row.eventName) &&
+    typeof row.campus === "string" &&
+    typeof row.date === "string" &&
+    (row.actualAttendance === null || typeof row.actualAttendance === "number") &&
+    (row.priorForecast === null || typeof row.priorForecast === "number") &&
+    typeof row.assumptions === "string"
+  );
+}
+
 const sampleQuestions = [
   "What is the likely BWI projection for Welcome Home 2026?",
   "How much is BWI up year over year?",
@@ -129,6 +208,9 @@ export function EventForecastPlanner({
   const selectedEvent = bigFivePlanningEvents.find((event) => event.eventName === eventName) ?? bigFivePlanningEvents[2];
   const [eventLiftPct, setEventLiftPct] = useState(selectedEvent.defaultLiftPct);
   const [question, setQuestion] = useState(sampleQuestions[0]);
+  const [planningHistory, setPlanningHistory] = useState<PlanningHistoryRow[]>(() => readPlanningHistoryRows());
+  const [priorActualInput, setPriorActualInput] = useState("");
+  const [historyMessage, setHistoryMessage] = useState("");
 
   useEffect(() => {
     if (!availableCampuses.includes(campus) && availableCampuses.length > 0) {
@@ -141,10 +223,37 @@ export function EventForecastPlanner({
   }, [selectedEvent.defaultLiftPct, eventName]);
 
   const forecast = useMemo(
-    () => buildForecast(metrics, eventRecords, campus, selectedEvent, eventLiftPct),
-    [campus, eventLiftPct, eventRecords, metrics, selectedEvent],
+    () => buildForecast(metrics, eventRecords, planningHistory, campus, selectedEvent, eventLiftPct),
+    [campus, eventLiftPct, eventRecords, metrics, planningHistory, selectedEvent],
   );
   const answer = useMemo(() => answerForecastQuestion(question, forecast), [forecast, question]);
+
+  useEffect(() => {
+    setPriorActualInput(forecast.priorEventActual === null ? "" : String(forecast.priorEventActual));
+    setHistoryMessage("");
+  }, [campus, eventName, forecast.priorEventActual]);
+
+  const savePriorActual = () => {
+    const parsed = Number(priorActualInput.replace(/,/g, ""));
+
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setHistoryMessage("Enter a valid prior event attendance number before saving.");
+      return;
+    }
+
+    const row: PlanningHistoryRow = {
+      eventName,
+      campus,
+      date: selectedEvent.priorDate,
+      actualAttendance: Math.round(parsed),
+      priorForecast: null,
+      assumptions: "Manual prior-year event actual entered in the dashboard forecast planner.",
+    };
+    const nextHistory = upsertPlanningHistoryRow(planningHistory, row);
+    setPlanningHistory(nextHistory);
+    writePlanningHistoryRows(nextHistory);
+    setHistoryMessage(`Saved ${campus} ${eventName} ${selectedEvent.priorDate} actual at ${Math.round(parsed).toLocaleString()}.`);
+  };
 
   return (
     <section className="rounded-[30px] border border-gray-200 bg-white p-6 lg:p-7">
@@ -260,6 +369,43 @@ export function EventForecastPlanner({
                 <span>-10%</span>
                 <span>Trend only</span>
                 <span>+20%</span>
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,0.88fr)_minmax(0,1.12fr)]">
+              <div className="rounded-2xl border border-gray-200 bg-white p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Prior event actual</p>
+                <p className="mt-1 text-sm leading-6 text-slate-700">
+                  Add the prior-year actual for any campus to anchor its forecast.
+                </p>
+                <div className="mt-4 flex gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    value={priorActualInput}
+                    onChange={(event) => setPriorActualInput(event.target.value)}
+                    className="h-12 min-w-0 flex-1 rounded-2xl border border-gray-200 bg-[#fbfbfc] px-4 text-sm font-medium text-slate-900 outline-none transition focus:border-[#2563eb]"
+                    placeholder="5044"
+                  />
+                  <button
+                    type="button"
+                    onClick={savePriorActual}
+                    className="inline-flex h-12 items-center gap-2 rounded-2xl bg-[#111827] px-4 text-sm font-semibold text-white transition hover:bg-black"
+                  >
+                    <Save className="h-4 w-4" />
+                    Save
+                  </button>
+                </div>
+                {historyMessage && <p className="mt-3 text-xs leading-5 text-slate-600">{historyMessage}</p>}
+              </div>
+
+              <div className="rounded-2xl border border-gray-200 bg-white p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">How it is forecasted</p>
+                <p className="mt-2 text-sm leading-6 text-slate-700">
+                  Likely forecast = prior event actual x Jan-Aug YoY growth x event-lift assumption. Low/high use
+                  recent Jan-Aug attendance volatility, clamped to a {forecast.confidenceBandPct}% band. Planning number
+                  uses the likely forecast plus part of the upside so operations prepare above the midpoint.
+                </p>
               </div>
             </div>
           </div>
@@ -387,13 +533,14 @@ export function EventForecastPlanner({
 function buildForecast(
   metrics: SundayMetric[],
   eventRecords: BigEventRecord[],
+  planningHistory: PlanningHistoryRow[],
   campus: string,
   event: BigFivePlanningEvent,
   eventLiftPct: number,
 ): ForecastResult {
   const currentYear = event.eventDate.slice(0, 4);
   const priorYear = String(Number(currentYear) - 1);
-  const priorEventActual = getPriorEventActual(campus, event.eventName, priorYear, eventRecords);
+  const priorEventActual = getPriorEventActual(campus, event.eventName, priorYear, eventRecords, planningHistory);
   const priorJanAug = getCampusAttendanceWindow(metrics, campus, priorYear, 1, 8);
   const currentJanAug = getCampusAttendanceWindow(metrics, campus, currentYear, 1, 8);
   const janAugGrowthPct = percentChangeNullable(currentJanAug.average, priorJanAug.average);
@@ -413,7 +560,7 @@ function buildForecast(
       : priorEventActual !== null && (currentJanAug.average !== null || recentTrend.recentAverage !== null)
         ? "Medium"
         : "Directional";
-  const historyRows = buildPlanningHistoryRows(campus, event, priorEventActual, likely, janAugGrowthPct, eventLiftPct);
+  const historyRows = buildPlanningHistoryRows(campus, event, planningHistory, priorEventActual, likely, janAugGrowthPct, eventLiftPct);
 
   return {
     campus,
@@ -447,13 +594,14 @@ function getPriorEventActual(
   eventName: BigFiveEventName,
   priorYear: string,
   eventRecords: BigEventRecord[],
+  planningHistory: PlanningHistoryRow[],
 ) {
-  const seeded = seededPlanningHistory.find(
+  const saved = planningHistory.find(
     (row) => row.campus === campus && row.eventName === eventName && row.date.startsWith(priorYear),
   );
 
-  if (seeded?.actualAttendance) {
-    return seeded.actualAttendance;
+  if (saved?.actualAttendance) {
+    return saved.actualAttendance;
   }
 
   if (campus !== "Network") {
@@ -470,12 +618,13 @@ function getPriorEventActual(
 function buildPlanningHistoryRows(
   campus: string,
   event: BigFivePlanningEvent,
+  planningHistory: PlanningHistoryRow[],
   priorEventActual: number | null,
   likelyForecast: number | null,
   janAugGrowthPct: number | null,
   eventLiftPct: number,
 ): PlanningHistoryRow[] {
-  const seededRows = seededPlanningHistory.filter((row) => row.campus === campus && row.eventName === event.eventName);
+  const savedRows = planningHistory.filter((row) => row.campus === campus && row.eventName === event.eventName);
   const currentRow: PlanningHistoryRow = {
     eventName: event.eventName,
     campus,
@@ -488,7 +637,7 @@ function buildPlanningHistoryRows(
         : `Forecast uses prior actual ${priorEventActual.toLocaleString()}, Jan-Aug YoY trend ${formatSignedPercent(janAugGrowthPct, "N/A")}, and ${formatSignedPercent(eventLiftPct)} event lift.`,
   };
 
-  return [...seededRows, currentRow];
+  return [...savedRows, currentRow];
 }
 
 function getCampusAttendanceWindow(
