@@ -6,6 +6,7 @@ import { InsightsPanel } from "../components/insights-panel";
 import { CampusPulseCard } from "../components/campus-pulse";
 import { ConversionFunnelCard } from "../components/conversion-funnel-card";
 import { DistributionCard } from "../components/distribution-card";
+import { EventForecastPlanner } from "../components/event-forecast-planner";
 import { YtdCard } from "../components/ytd-card";
 import {
   type ComparisonFilters,
@@ -159,6 +160,8 @@ export function DashboardPage() {
       </section>
 
       <YtdCard summary={ytdSummary} />
+
+      <EventForecastPlanner metrics={metrics} eventRecords={bigEventRecords} campusOptions={availableCampuses} />
 
       <ConversionFunnelCard
         metrics={metrics}
